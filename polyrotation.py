@@ -116,3 +116,4 @@ def poly_rotation_init(jrot, q_eq, mass, q, p):
         p[jy] -= pang[1]
         p[jz] -= pang[2]
     return (q,p, ai, am)
+#asd
