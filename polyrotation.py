@@ -47,6 +47,7 @@ def calcI(qq, w):
         [Ixy, Iyy, Iyz],
         [Ixz, Iyz, Izz]
         ])
+    #principial axis and eigenvalues
     ai, dontneed = np.linalg.eigh(I)
     Iinv = np.linalg.inv(I)
     return (ai, Iinv)
@@ -67,6 +68,7 @@ def angmomcorr(qq, pp):
 def poly_rotation_init(jrot, q_eq, mass, q, p):
     ai,Iinv = calcI(q_eq, mass)
 
+    #angmom from rotation quantum numbers
     amjr = math.sqrt(jrot * (jrot + 1))
 
   #set random direction for angular momentum

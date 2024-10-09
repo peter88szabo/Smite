@@ -1,32 +1,27 @@
 import numpy as np
 from collections import deque, Counter
 
-def parseXYZ(xyz):
-    lines = xyz.strip().split('\n')
-    q = []
-    atoms = []
-    for line in lines:
-        parts = line.split()
-        a, x, y, z = parts[0], float(parts[1]), float(parts[2]), float(parts[3])
-        atoms.append(a)
-        q.extend([x, y, z])
-    q = np.array(q)
-    return atoms, q
-
 def create_adjacency_list(atoms, q, bond_th_HX, bond_th_XX):
     coords = q.reshape(-1, 3)
     adj_list = {i: [] for i in range(len(atoms))}
     for i in range(len(coords)):
         for j in range(i + 1, len(coords)):
 
-            if atoms[i] == 'H' and atoms[j] == 'H':
-                bond_threshold = bond_th_HX 
-            elif atoms[i] != 'H' or atoms[j] != 'H':
-                bond_threshold = bond_th_XX 
+            #----------------------------------------------------------------
+            #Yehh, ugly nested loops...later will be made more aesthetic
 
-            if np.linalg.norm(coords[i] - coords[j]) <= bond_threshold:
-                adj_list[i].append(j)
-                adj_list[j].append(i)
+            #We do not care about H-H atom pairs only H-X or X-Y pairs
+            if atoms[i] != 'H' or atoms[j] != 'H':
+
+                if atoms[i] != 'H' and atoms[j] != 'H':
+                    bond_threshold = bond_th_XX 
+                else:
+                    bond_threshold = bond_th_HX 
+
+                if np.linalg.norm(coords[i] - coords[j]) <= bond_threshold:
+                    adj_list[i].append(j)
+                    adj_list[j].append(i)
+            #----------------------------------------------------------------
 
     return adj_list
 
@@ -62,6 +57,22 @@ def create_chemical_formula(atoms):
     return formula
 
 if __name__ == "__main__":
+
+    def parseXYZ(xyz):
+        lines = xyz.strip().split('\n')
+        q = []
+        atoms = []
+        for line in lines:
+            parts = line.split()
+            a, x, y, z = parts[0], float(parts[1]), float(parts[2]), float(parts[3])
+            atoms.append(a)
+            q.extend([x, y, z])
+        q = np.array(q)
+        return atoms, q
+
+
+
+
     xyz0 = '''
       C      -1.185385      1.500364     -0.174799
       C       0.057100      1.525641      0.290486
@@ -98,6 +109,7 @@ if __name__ == "__main__":
 
     
     atoms, q = parseXYZ(xyz0)
+    q = q / 0.5291772
     formula = create_chemical_formula(atoms)
     print("original Molecule: ", formula)
     print()
@@ -105,8 +117,8 @@ if __name__ == "__main__":
     # Define the axis using atoms with indices 1 and 2 (0-based index)
     atom1_idx = 3
     atom2_idx = 4
-    bond_th_HX = 1.5
-    bond_th_XX = 2.0
+    bond_th_HX = 1.5/0.5291772
+    bond_th_XX = 2.0/0.5291772
 
     side1_indices, side2_indices = find_fragments_bfs(atoms, q, atom1_idx, atom2_idx, bond_th_HX, bond_th_XX)
 

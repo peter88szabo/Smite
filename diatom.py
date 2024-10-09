@@ -11,43 +11,58 @@ def diatom_init_harm(req, omega, mass, jrot, nvib):
 
     redmass = mass[0]*mass[1] / (mass[0] + mass[1])
 
+   #Phase of vibration (angle of distance as cos(time*omega) --> cos(2pi*rnd)
     dr_angle = random.uniform(0, 2 * math.pi)
 
     dr = math.sqrt( 2 * ( nvib + 0.5 ) / ( redmass * omega)) * math.cos(dr_angle)
 
+   # do the same for momentum
     pr_angle = random.uniform(0, 2 * math.pi)
     pr = - math.sqrt(2 * ( nvib + 0.5 ) * redmass * omega) * math.sin(pr_angle)
      
     r = req + dr
 
+   #we just put in an arbitrary coordinate system
     q1 = [r, 0.0, 0.0]
     q2 = [0.0, 0.0, 0.0]
 
     vr = pr / redmass
 
+   #center of mass coordinate system: velocity is distributed
     g = mass[1] / sum(mass)
 
     p1 = [mass[0] * vr * g, 0.0, 0.0]
     p2 = [mass[1] * (vr - p1[0]/mass[0]), 0.0, 0.0]
 
+   #after this we shift everthing into the center of mass
     qq, pp = cenmass(q1+q2, p1+p2, mass)
 
+#------------------We are done with the vibrational part ---------------------------
+# Here comes the rotational sampling:
+
+   #we convert the rotational quantum number (jrot) --> angmom
     agnmomabs = math.sqrt(jrot * ( jrot + 1))
 
+   #this is the moment of inertia:
+   #this is 2D object, thus the one of the components must be infinit
     ai = [1.0e20, redmass * r * r, redmass * r * r]
 
+  #sample the phase of rotation:
     angle = random.uniform(0, 2 * math.pi)
 
+  #2D rotor, hence one component of angmom is 0
     angmom = [
         0.0,
         agnmomabs * math.sin(angle),
         agnmomabs * math.cos(angle)
     ]
 
+  # the angular velocities:
     wx = 0.0
     wy = -angmom[1] / ai[1]
     wz = -angmom[2] / ai[2]
 
+ #concerting the angular velocities from internal coord to cartesian components
     for i in range(len(mass)):
         jx = i
         jy = i + 1
@@ -58,11 +73,18 @@ def diatom_init_harm(req, omega, mass, jrot, nvib):
             wx * qq[jy] - wy * qq[jx]
         ])
 
+       #from velocity to momentum
         pang = ang * mass[i]
 
+      #pp are originally the center of mass (cartesian) vibrational coordinates
+      # here we add the rotationally sampled coordinated to the vibrational ones
         pp[jx] -= pang[0]
         pp[jy] -= pang[1]
         pp[jz] -= pang[2]
+
+    #the rotationally and vibrationally sampled molecule (this happened in internal coord that transforemed to Cartesian)
+    #then we rotatate randomly w.r.t the Euler angles in the 3D space (coords and momenta as well)
+    #around the the COM
 
     q, p = euler_rot(qq, pp)
 

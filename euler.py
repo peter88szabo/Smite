@@ -3,6 +3,8 @@ import random
 from math import sin, cos, acos, pi
 
 def euler_rot(qq, pp):
+    #this eats the center of mass cords)
+    #always before using this you need to call cenmass()
     phi   = random.uniform(0, 2 * pi)
     theta = acos(random.uniform(0, 1))
     chi   = random.uniform(0, 2 * pi)
@@ -17,9 +19,11 @@ def euler_rot(qq, pp):
     rzy =  sin(theta)*sin(chi)
     rzz =  cos(theta)
 
+    #the rotated coords and momenta
     q = [0] * len(qq)
     p = [0] * len(pp)
 
+    #R*qq and R*pp    matrix-vector multiplcation
     for i in range(len(qq)//3):
         q[3*i    ] = qq[3*i]*rxx + qq[3*i+1]*rxy + qq[3*i+2]*rxz
         q[3*i + 1] = qq[3*i]*ryx + qq[3*i+1]*ryy + qq[3*i+2]*ryz
@@ -29,6 +33,7 @@ def euler_rot(qq, pp):
         p[3*i + 1] = pp[3*i]*ryx + pp[3*i+1]*ryy + pp[3*i+2]*ryz
         p[3*i + 2] = pp[3*i]*rzx + pp[3*i+1]*rzy + pp[3*i+2]*rzz
     return (q,p)
+
 
 def euler_rotQ(qq):
     phi   = random.uniform(0, 2 * pi)

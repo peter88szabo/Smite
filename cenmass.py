@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def cenmass(q, p, w):
     vcm = np.zeros(3)
     qcm = np.zeros(3)
@@ -28,6 +29,7 @@ def cenmass(q, p, w):
         q[3 * i + 2] -= qcm[2]
 
     return q, p
+
 
 
 def cenmassQ(q, w):
