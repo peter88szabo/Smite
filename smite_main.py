@@ -32,14 +32,12 @@ class Molecule:
         self.totmass    = np.sum(mass) 
         self.qchem      = None 
 
-    def center_of_mass(self, give_cenmass_coord=False):
+    def center_of_mass(self):
         """
         Calculate the center of mass of the fragment and shift the molecule
         to its center of mass.
         """
         self.q, self.p = cenmass(self.q, self.p, self.mass)
-
-        return self.q, self.p
 
     def rotate_random(self):
         """
@@ -88,7 +86,7 @@ class Molecule:
                     print(istep, T, V, E, dE)
                     print_trajectory(file_trj, self.atoms, self.q, self.p, V, dE, dt, istep)
 
-        def traj_temperature(self,nfix):
+        def traj_temperature(self, nfix):
         '''
         Actual temperature of the system
 
@@ -190,37 +188,17 @@ class Fragment(Molecule):
         c9=1.0e8/0.5291772e0
         c10=137.035999074
 
-        # Get the dictionary of parameters for the specified diatom type
-        if 'diatom' in kwargs:
-            if diat in diatomic_molecules:
-                parameters = diatomic_molecules[diat]
-                print(f"\nParameters of diatom are imported from library.")
-                print(f"Parameters for {diat}: req = {parameters['req']} Å, omega = {parameters['omega']} cm-1, De = {parameters['De']} eV \n")
-
-                req = parameters.get("req")/0.5291772
-                omega = parameters.get("omega")*c10/c9*(math.pi * 2) #converting from cm-1 to atomic unit
-            elif diat[::-1] in diatomic_molecules:
-                parameters = diatomic_molecules[diat[::-1]]
-                print(f"\nParameters of diatom are imported from library.")
-                print(f"Parameters for {diat}: req = {parameters['req']} Å, omega = {parameters['omega']} cm-1, De = {parameters['De']} eV \n")
-
-                req = parameters.get("req")/0.5291772
-                omega = parameters.get("omega")*c10/c9*(math.pi * 2) #converting from cm-1 to atomic unit
-
-            else:
-                raise ValueError(f"ERROR: Diatom {diat} not found in the diatom library.")
-        elif req in kwargs and omega in kwargs:
+        if req in kwargs and omega in kwargs:
             print("Parameters of diatom are defined by the user: req[Angstrom]={req} and omega[cm-1]={omega}")
         else:
             raise ValueError("ERROR: Diatom_Init needs (req[Angstrom] and omega[cm-1]) or diatom='XY' as input")
-
-
 
         mass = get_mass_vector(atoms)
 
         q1 = [req, 0.0, 0.0]
         q2 = [0.0, 0.0, 0.0]
-        ###################################################HERE modification is needed
+        p1 = [0.0, 0.0, 0.0]
+        p2 = [0.0, 0.0, 0.0]
 
         q_ini, p_ini  = cenmass(q1+q2, p1+p2, mass)
 
@@ -349,7 +327,7 @@ class Fragment(Molecule):
             self.q, self.p = polyatom_vib_rot_sampling(mass=self.mass, atoms=self.atoms, q_eq=self.q_ini, ww=self.freq, L=self.Lmat,
                                                    vib_modes=self.sampling, verbosity=verbosity, traj_index=traj_index)
 
-        self.q = cenmassQ(self.q, self.mass)
+        self.q, self.p = cenmass(self.q, self.p, self.mass)
 
 
         evib = 0.0
@@ -363,7 +341,7 @@ class Fragment(Molecule):
 
        #randomly rotate the molecule about its center of mass
         if self.euler_rot == True:
-            self.q, self.p = euler_rotQ(self.q, self.p)
+            self.q, self.p = euler_rot(self.q, self.p)
 
         self.overlap = check_atomic_overlap(self.atoms, self.q)
 
