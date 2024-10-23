@@ -1,8 +1,8 @@
 import numpy as np;
 import random
 import math
-from cenmass import cenmass
-from euler   import euler_rot
+from utils.cenmass import cenmass
+from utils.euler   import euler_rot
 
 
 def diatom_init_harm(req, omega, mass, jrot, nvib):
@@ -82,13 +82,14 @@ def diatom_init_harm(req, omega, mass, jrot, nvib):
         pp[jy] -= pang[1]
         pp[jz] -= pang[2]
 
+
     #the rotationally and vibrationally sampled molecule (this happened in internal coord that transforemed to Cartesian)
     #then we rotatate randomly w.r.t the Euler angles in the 3D space (coords and momenta as well)
     #around the the COM
 
-    q, p = euler_rot(qq, pp)
+    #q, p = euler_rot(qq, pp)
 
-    return (q, p)
+    return (qq, pp)
 
 def distance_between_ij(i,j,q):
     tx = q[3*i+2] - q[3*j+2]

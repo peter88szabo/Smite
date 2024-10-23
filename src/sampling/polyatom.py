@@ -1,11 +1,9 @@
 import numpy as np
 import random
 import math
-from normalmode     import getNormalmode, print_frequencies
-from nmodeprint     import print_normalmode
-from rotation_axis  import rotate_fragment, locate_frags_to_rotate
-from atomic_masses  import get_mass_vector 
-from eckart         import eckart_transform
+from normalmode.normalmode     import getNormalmode, print_frequencies
+from normalmode.nmodeprint     import print_normalmode
+from normalmode.eckart         import eckart_transform
 #from atomic_overlap import check_atomic_overlap
 
 #     [Anstrom]*c1=[bohr]
@@ -67,7 +65,7 @@ def specify_modes(vib_modes, **kwargs):
     Sets the mode type and value for a given mode index.
 
     Modes how to sample: these could be signed as with Q, T, E, R
-    to give quantum number (Q), Temperature (T), energy (E), or rotor (R)
+    to give quantum number (Q), Temperature (T), energy (E)
 
     {1: ('Q', 0),
      2: ('Q', 3),
@@ -75,11 +73,9 @@ def specify_modes(vib_modes, **kwargs):
      4: ('T', 300.0),
      5: ('E', 30.0),
      6: ('E', 11.0),
-     8: ('R', (1,2) ),
-     9: ('R', (2,3) )}
 
     Parameters:
-    vib_modes (dict): The dictionary of vibrational (and/or rotor) modes.
+    vib_modes (dict): The dictionary of vibrational modes.
 
     kwargs:
     fix_quantum = [(1, 0),
@@ -90,14 +86,6 @@ def specify_modes(vib_modes, **kwargs):
 
     fix_temp    = [(5, 300.0),
                    (6, 400.0)]
-
-    rotor_list   = [(   1, (1, 2)),
-                    (   2, (4, 5)),
-                    (None, (7, 9)),
-       # Add more pairs as needed]
-
-       'None' is used for rotors which cannot assigned to a vibration
-        Such rotors will be appended to vib_modes with a negative integer key 
     """
 
     if 'fix_quantum' in kwargs:
@@ -118,16 +106,6 @@ def specify_modes(vib_modes, **kwargs):
                 frequency = vib_modes[mode_index][0]
                 vib_modes[mode_index] = (frequency, 'T', tempr)
 
-    if 'rotor_list' in kwargs:
-        for mode_index, (atom1, atom2) in kwargs['rotor_list']:
-            if mode_index is not None and mode_index in vib_modes:
-                frequency = vib_modes[mode_index][0]
-                vib_modes[mode_index] = (frequency, 'R', (atom1, atom2))
-            else:
-                new_index = min(vib_modes.keys()) - 1 
-                frequency = None  
-                vib_modes[new_index] = (frequency, 'R', (atom1, atom2))
-
     return vib_modes
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------
@@ -137,7 +115,7 @@ def init_vib_rot_modes(freq, init_type='ZPE', temp=300.0, **kwargs):
     #initialize all vibrational modes the same way (either with ZPE quantum state 'nvib = 0' or according to a temperature)
     vib_modes = initialize_vibrational_modes(freq=freq, init_type=init_type, temp=temp)
 
-    #then if any specific mode is fixed (energy, quantum number or temperature or chosen as a rotor), everything in kwargs:
+    #then if any specific mode is fixed (energy, quantum number or temperature), everything in kwargs:
     if kwargs:
         vib_modes = specify_modes(vib_modes, **kwargs)
 
@@ -146,14 +124,14 @@ def init_vib_rot_modes(freq, init_type='ZPE', temp=300.0, **kwargs):
 
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------
-def polyatom_vib_rot_sampling(mass, atoms, q_eq, ww, L, vib_modes, **kwargs):
+def polyatom_vib_rot_sampling(wmass, atoms, q_eq, ww, L, vib_modes, **kwargs):
     '''
      q_eq: equilbiriom coords
      ww: freq
      L: eigenvector of Hessians (Normal mode <--> Cartesian space transformator)
     '''
 #-------------------------------------------------------------------------------------------------------------------------------------------------
-    #phase_sampling together with temperature, and other fixed and rotor_list fetched as kwargs
+    #phase_sampling together with temperature, and other fixed fetched as kwargs
 
     temp = kwargs.get('temp', 300.0)
     phase_sampling = kwargs.get('phase_sampling', 'linear')
@@ -161,20 +139,8 @@ def polyatom_vib_rot_sampling(mass, atoms, q_eq, ww, L, vib_modes, **kwargs):
     traj_index =  kwargs.get('traj_index', -999)
     bond_th_HX = kwargs.get('bond_th_HX', 1.4/0.5291772) # bond threshold in Angstrom for H-X, where X = any non H-atom
     bond_th_XX = kwargs.get('bond_th_XX', 2.0/0.5291772) # bond threshold in Angstrom for X-X bonds to be considered as a part of a fragment
-
-    # ww: frequencies (in atomic units)
-    # L : transfomration matrix (normal mode --> Cartesian), consist of the eigenvectors of the hessian
-
-    #ww, ww_low, L = getNormalmode(mass, hessian)
-    #ww_all = np.append(ww_low, ww)
-
-    '''
-    # for all modes that are not rotors (or even rotors but with 0.0 energy or ZPE) we do normal mode sampling
-    # then after this we sample one-by-one the internal rotors too
-    # then discard the geoms where there is some overlap between atoms --> this happens not here
-
-    '''
     #------------------------------------------------------------------------------------------
+
     energy = []
     nvib = []
     #the main loop running over the normal modes
@@ -199,13 +165,8 @@ def polyatom_vib_rot_sampling(mass, atoms, q_eq, ww, L, vib_modes, **kwargs):
             energy += [excitation]
             nv = excitation/ww[imode] - 0.5 #non-integer quantum number
             nvib += [nv]
-        elif sampling_mode == 'R':
-            #make sure that the corresponding torsional modes (rotors) has only ZPE energy
-            nv = 0 
-            nvib += [nv]
-            energy += [ww[imode]*(nv + 0.5)]
         else:
-            raise ValueError("sampling_mode must be 'Q', 'E', 'T' or 'R' ") 
+            raise ValueError("sampling_mode must be 'Q', 'E', 'T'") 
     #------------------------------------------------------------------------------------------
 
     Evib = sum(np.array(energy))
@@ -224,46 +185,24 @@ def polyatom_vib_rot_sampling(mass, atoms, q_eq, ww, L, vib_modes, **kwargs):
     #Amplitude of nornam modes (they are already chose accordingly the input, Q, E, T, R)
     ampl = [math.sqrt(2.0 * energy[i])/ww[i] for i in range(len(ww))]
 
-    if phase_sampling == 'cosine':
-        #normal mode coords which is a 1D harmonic oscillator
-        q_norm = [a * math.cos(random.uniform(0, 2 * math.pi)) for a in ampl]
-    elif phase_sampling == 'linear':
-        q_norm = [a * random.uniform(-1, 1) for a in ampl]
-    else:
-        raise ValueError("Your given {sampling} method is not available. Options to choose: cosine or linear\n")
+
+
+    #normal mode positions and velocities
+    q_norm = [a * math.cos(random.uniform(0, 2 * math.pi)) for a in ampl]
+    v_norm = [- ampl[i] * ww[i] * math.sin(random.uniform(0, 2 * math.pi)) for i in range(len(ampl))]
 
     #Normal mode to Cartesian transformation:
     q_cart_vib = np.transpose(q_eq) + np.matmul(L, np.transpose(np.array(q_norm)))
+    v_cart_vib = np.matmul(L, np.transpose(v_norm))
+    p_cart_vib = [wmass[i] * v_cart_vib[i] for i in range(len(v_cart_vib)) ]
 
+    q,p = cenmass(q_desc, p_desc, mass)
 
-    q_temp_rovib = q_cart_vib #temporary variable that changes iteratively for each rotor
+    q,p,ai,am = poly_rotation_init(jrot, q_eq, mass, q, p)
 
-    #----------------------------- Rotor sampling ----------------------------------------------------
+    #Randomly roteate the molecule about its center of mass
+    q,p = euler_rot(q, p)
 
-    for mode_index, (freq, sampling, value) in vib_modes.items():
-
-        if sampling == 'R':
-            atom1 = value[0]
-            atom2 = value[1]
-
-            #use the equilbrium structure to locate the fragment to rotate:
-            ind_rot_center, rot_frag_index, spectator_frag_index = locate_frags_to_rotate(atoms, q_eq, atom_ax1=atom1, atom_ax2=atom2,
-                                                                   bond_th_HX=bond_th_HX, bond_th_XX=bond_th_XX, verbosity=verbosity, traj_index=traj_index)
-
-            theta = (random.uniform(0.0, 360.0)) #the function eats the angle in degree
-
-            #here we rewrite the same temporary q_temp_rovib vector after sampling each rotor
-            q_temp_rovib = rotate_fragment(atoms = atoms, q=q_temp_rovib, atom_ax1=atom1, atom_ax2=atom2,
-                                           auto_frag=False, rot_angle=theta, frag_index=rot_frag_index, atom_rotcenter=ind_rot_center, **kwargs)
-
-    # we need something to reject the overlapping configurations
-    # if check_atomic_overlap(atoms, q_temp_rovib):
-    #     q_cart_samp = q_cart_vib 
-    # else:
-    #     q_cart_samp = q_temp_rovib
-    #----------------------------- End of rotor sampling ----------------------------------------------------
-
-    q = q_temp_rovib
 
     return(q)
 #-------------------------------------------------------------------------------------------
@@ -271,7 +210,8 @@ def polyatom_vib_rot_sampling(mass, atoms, q_eq, ww, L, vib_modes, **kwargs):
 
 if __name__ == "__main__":
 
-    from hessian import getHessian
+    from normalmode.hessian        import getHessian
+    from utils.atomic_masses       import get_mass_vector 
 
     def parseXYZ(xyz):
         lines = xyz.strip().split('\n')
@@ -333,21 +273,15 @@ if __name__ == "__main__":
     fix_temp    = [(5, 330.0),
                    (6, 430.0)]
 
-    rotor_list = [(7, (1, 2)),
-                  (8, (4, 5)),
-                  (None, (7, 9)),
-                  (None, (12, 13)),
-                  (None, (14, 15)),]
 
-    #vib_modes = specify_modes(vibrational_modes, fix_quantum=fix_quantum, fix_energy=fix_energy, fix_temp=fix_temp, rotor_list=rotor_list)
-    vib_modes = init_vib_rot_modes(freq, init_type='Temp', temp=210.0, fix_quantum=fix_quantum, fix_energy=fix_energy, fix_temp=fix_temp, rotor_list=rotor_list)
-    #vib_modes = init_vib_rot_modes(freq, init_type='Temp', temp=210.0, rotor_list=rotor_list)
+    #vib_modes = specify_modes(vibrational_modes, fix_quantum=fix_quantum, fix_energy=fix_energy, fix_temp=fix_temp)
+    vib_modes = init_vib_rot_modes(freq, init_type='Temp', temp=210.0, fix_quantum=fix_quantum, fix_energy=fix_energy, fix_temp=fix_temp)
+    #vib_modes = init_vib_rot_modes(freq, init_type='Temp', temp=210.0)
     #vib_modes = init_vib_rot_modes(freq, init_type='ZPE', temp=210.0)
 
     print("\nfix quantum: ", fix_quantum)
     print("fix energy: ", fix_energy)
     print("fix temp: ", fix_temp)
-    print("rotor list: ", rotor_list)
 
 # Print the updated vibrational modes
     print("\nafter setting modes")
@@ -495,13 +429,12 @@ if __name__ == "__main__":
     fix_temp    = [(5, 330.0),
                    (6, 430.0)]
 
-    rotor_list = [(None, (1, 2))]
 
 
     #vib_modes = init_vib_rot_modes(ww, init_type='Temp', temp=210.0, fix_quantum=fix_quantum)
-    #vib_modes = init_vib_rot_modes(ww, init_type='Temp', temp=210.0, fix_quantum=fix_quantum, rotor_list=rotor_list)
-    #vib_modes = init_vib_rot_modes(ww, init_type='Ene', temp=210.0, rotor_list=rotor_list)
-    vib_modes = init_vib_rot_modes(ww, init_type='ZPE', temp=1210.0, fix_quantum=fix_quantum, rotor_list=rotor_list)
+    #vib_modes = init_vib_rot_modes(ww, init_type='Temp', temp=210.0, fix_quantum=fix_quantum)
+    #vib_modes = init_vib_rot_modes(ww, init_type='Ene', temp=210.0)
+    vib_modes = init_vib_rot_modes(ww, init_type='ZPE', temp=1210.0, fix_quantum=fix_quantum)
     #vib_modes = init_vib_rot_modes(ww, init_type='ZPE')
 
     # Print the updated vibrational modes

@@ -5,7 +5,7 @@ from qchem_interfaces.sparrowpy    import SparrowPy_Hessian
 from qchem_interfaces.sparrowbin   import Sparrowbin_Hessian
 from qchem_interfaces.xtbrun       import XTB_Hessian
 
-from format_and_print import parseXYZ
+from utils.format_and_print import parseXYZ
 
 import numpy as np
 import os

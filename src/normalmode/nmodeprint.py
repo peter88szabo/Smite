@@ -1,7 +1,7 @@
 import numpy as np
 import math
 import os
-from normalmode import getNormalmode
+from normalmode.normalmode import getNormalmode
 
 def print_nmode_traj(atoms, q, dt, istep, output_file):
     b2a = 0.52917721092

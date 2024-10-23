@@ -1,20 +1,21 @@
 import numpy as np
 import os
 import math
-from diatomic_parameters import *
 
-from cenmass            import cenmass
-from euler              import euler_rot          
-from format_and_print   import parseXYZ
-from hessian            import getHessian
-from format_and_print   import print_trajectory
-from eckart             import eckart_transform
-from atomic_overlap     import check_atomic_overlap
-from atomic_masses      import get_mass_vector 
-from nmodeprint         import print_normalmode 
-from normalmode         import print_frequencies 
-from polyatom           import init_vib_rot_modes
-from polyatom           import polyatom_vib_rot_sampling
+from utils.cenmass            import cenmass
+from utils.euler              import euler_rot          
+from utils.format_and_print   import parseXYZ
+from utils.format_and_print   import print_trajectory
+from utils.atomic_overlap     import check_atomic_overlap
+from utils.atomic_masses      import get_mass_vector 
+
+from normalmode.hessian       import getHessian
+from normalmode.eckart        import eckart_transform
+from normalmode.nmodeprint    import print_normalmode 
+from normalmode.normalmode    import print_frequencies 
+
+from sampling.polyatom        import init_vib_rot_modes
+from sampling.polyatom        import polyatom_vib_rot_sampling
 
 class Molecule:
     def __init__(self, atoms, mass, q_ini, p_ini):
@@ -86,7 +87,7 @@ class Molecule:
                     print(istep, T, V, E, dE)
                     print_trajectory(file_trj, self.atoms, self.q, self.p, V, dE, dt, istep)
 
-        def traj_temperature(self, nfix):
+    def traj_temperature(self, nfix):
         '''
         Actual temperature of the system
 
@@ -142,9 +143,9 @@ class Molecule:
 
 
 class Fragment(Molecule):
-    def __init__(self, atoms, mass, q_ini):
+    def __init__(self, atoms, mass, q_ini, p_ini):
 
-        super().__init__(atoms, mass, q_ini)
+        super().__init__(atoms, mass, q_ini, p_ini)
         self.hessian    = None
         self.Lmat       = None #Normal mode to Cartesian transformator (eigvec of Hessian)
         self.freq       = None
@@ -225,6 +226,7 @@ class Fragment(Molecule):
 
         natom, atoms, q_eq = parseXYZ(xyz)
         q_eq = np.array(q_eq) / 0.52917721092  #Angstrom to Bohr
+        p_ini = np.zeros(len(q_eq))
 
         if len(atoms) <= 2:
             raise ValueError("ERROR: PolyatomInit requires more than two atoms.")
@@ -236,7 +238,8 @@ class Fragment(Molecule):
         hessian = getHessian(qcinput=qchem, hessFile=hessFile, xyz=xyz)
 
         freq, freq_low, Lmat = print_normalmode(fname=fname, atoms=atoms, mass=mass, q_eq=q_eq, hessian=hessian,
-                                                give_freq_and_Lmat=True, Amp=Amp_modeanim, is_eckart=is_eckart, linear=linear)
+                                                give_freq_and_Lmat=True, Amp=Amp_modeanim,
+                                                is_eckart=is_eckart, linear=linear)
 
         freq_all = np.append(freq_low, freq)
 
@@ -276,7 +279,6 @@ class Fragment(Molecule):
 
         if self.rigid == False:
 
-            #-----------------------------------EZT KELL JAVITANI-------------------------------
             if self.sampling['Q']:
                 energy = self.omega_diat*(nvib + 0.5)
             elif self.sampling['Q']:
@@ -287,24 +289,12 @@ class Fragment(Molecule):
             else:
                 raise ValueError("Either nvib=xxx or temp=xxx or energy=xxx must be given as input in Diatom_Sampling")
 
-            #Eventually we have and integer or non-integer quantum number to sample the harmonic oscillator
-            if self.phase_samp == 'cosine':
-                dr = math.sqrt( 2 * ( nvib + 0.5 ) / ( redmass * self.omega_diat)) * math.cos(random.uniform(0, 2 * math.pi))
-            elif self.phase_samp == 'linear':
-                dr = math.sqrt( 2 * ( nvib + 0.5 ) / ( redmass * self.omega_diat)) * random.uniform(-1, 1)
-            else:
-                raise ValueError("{self.phase_samp} method is not available. Options to choose: cosine, linear ")
+            jrot = 10
+            self.q, self.p = diatom_init_harm(self.req_diat, self.omega_diat, self.mass, jrot, nvib)
 
-            r = self.req_diat + dr
-
-            q1 = [r, 0.0, 0.0]
-            q2 = [0.0, 0.0, 0.0]
-            ######################Here modification is needed
-
-            self.q  = cenmassQ(q1+q2, self.mass)
         else:
             self.q = self.q_ini
-            self.p = 0.0
+            self.p = 0.0 #here we should add the option for rigid rotation. Everthing is built in above, we should separate it
 
         if self.euler_rot == True:
             self.q, self.p = euler_rot(self.q, self.p)
@@ -443,7 +433,7 @@ if __name__ == '__main__':
     seed = 211422
     random.seed(seed)
 
-    qcinput_XTB = {
+    qcinput = {
     'qchem': 'XTB',
     'path': '/home/peter/orca_6_0_0/xtb',
     'nproc': 8,
@@ -467,7 +457,7 @@ if __name__ == '__main__':
     'wfu': False
     }
 
-    qcinput = {
+    qcinput_PySCF = {
     'qchem': 'PySCF',
     'path': '',
     'nproc': 4,
@@ -504,8 +494,6 @@ if __name__ == '__main__':
     fix_temp    = [(5, 330.0),
                    (6, 430.0)]
 
-    rotor_list = [(None, (1, 2))]
-
     fix_quantum_water = [(2, 6)]
 
     water  = Fragment.Polyatom_Init(fname=fname_water, qchem=qcinput, xyz=xyz_water, euler_rot=True)
@@ -513,26 +501,28 @@ if __name__ == '__main__':
     #water.Specify_Polyatom_Sampling(init_type='ZPE', fix_quantum=fix_quantum, fix_energy=fix_energy)
     water.Specify_Mode_Sampling(init_type='ZPE', fix_quantum=fix_quantum_water)
 
-    diene  = Fragment.Polyatom_Init(fname=fname_diene, qchem=qcinput, xyz=xyz_diene)
-    diene.Specify_Mode_Sampling(init_type='ZPE', fix_quantum=fix_quantum, rotor_list=rotor_list)
+    #diene  = Fragment.Polyatom_Init(fname=fname_diene, qchem=qcinput, xyz=xyz_diene)
+    #diene.Specify_Mode_Sampling(init_type='ZPE', fix_quantum=fix_quantum)
 
-    diatom = Fragment.Diatom_Init(atoms=['S','O'], diatom='SO')
-    diatom.Specify_Mode_Sampling(init_type='ZPE')
+    #diatom = Fragment.Diatom_Init(atoms=['S','O'], diatom='SO')
+    #diatom.Specify_Mode_Sampling(init_type='ZPE')
 
     print("----------------------------------------")
     print()
     print("water atoms: ", water.atoms)
     print("water mass:  ", water.mass)
     print("water q:     ", water.q)
+    print("water p:     ", water.q)
     print("water sampling:")
     for i in water.sampling:
         print(i,":",water.sampling[i])
 
-    print()
-    print("diatom atoms: ", diatom.atoms)
-    print("diatom mass:  ", diatom.mass)
-    print("diatom q:     ", diatom.q)
-    print("----------------------------------------")
+    #print()
+    #print("diatom atoms: ", diatom.atoms)
+    #print("diatom mass:  ", diatom.mass)
+    #print("diatom q:     ", diatom.q)
+    #print("diatom p:     ", diatom.p)
+    #print("----------------------------------------")
 
 
     if os.path.exists(traj_file_water):
@@ -545,17 +535,17 @@ if __name__ == '__main__':
             water.print_structure(file_trj, igeom) 
     print("Water done")
 
-    if os.path.exists(traj_file_diene):
-        os.remove(traj_file_diene)
-        print(f"\n{traj_file_diene} already exists, it has been deleted to create a new one.\n")
+   # if os.path.exists(traj_file_diene):
+   #     os.remove(traj_file_diene)
+   #     print(f"\n{traj_file_diene} already exists, it has been deleted to create a new one.\n")
 
 
-    print()
-    print("--------- Diene--------------------------------")
-    print()
-    with open(traj_file_diene, "a") as file_trj:
-        for igeom in range(ngeom):
-            diene.Polyatom_Sampling() #in kwargs can be given euler_rot=False, rigid=True...
-            diene.print_structure(file_trj, igeom)
-    print("Diene done")
+    #print()
+    #print("--------- Diene--------------------------------")
+    #print()
+    #with open(traj_file_diene, "a") as file_trj:
+    #    for igeom in range(ngeom):
+    #        diene.Polyatom_Sampling() #in kwargs can be given euler_rot=False, rigid=True...
+    #        diene.print_structure(file_trj, igeom)
+    #print("Diene done")
 

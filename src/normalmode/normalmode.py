@@ -1,6 +1,6 @@
 import numpy as np
 import math
-from eckart         import eckart_transform
+from normalmode.eckart    import eckart_transform
 
 #     [Anstrom]*c1=[bohr]
 c1=1.0e0/0.5291772e0
