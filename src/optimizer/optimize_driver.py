@@ -22,7 +22,9 @@ def Optimize(qcinput, file_wf, q, atoms):
         print("No availble option yet")
         #V = Sparrowbin_Energy(file_wf, q, atoms, qcinput)
     elif qchem == 'XTB':
+        print("No availble option yet")
         #V = XTB_Energy(file_wf, q, atoms, qcinput)
+    elif qchem == 'PES':
         print("No availble option yet")
     else:
         raise ValueError("Non-Existing Quantum Chemical method is input. Avaiable packages: Orca, PySCF, Sparrow_bin, Sparrow_Py, XTB")
