@@ -14,8 +14,9 @@ from normalmode.eckart        import eckart_transform
 from normalmode.nmodeprint    import print_normalmode 
 from normalmode.normalmode    import print_frequencies 
 
-from sampling.polyatom        import init_vib_rot_modes
-from sampling.polyatom        import polyatom_vib_rot_sampling
+from sampling.polyvibration   import init_vib_rot_modes
+from sampling.polyvibration   import polyatom_vibration_sampling
+from smapling.polyrotation    import polyatom_rotation_sampling
 
 class Molecule:
     def __init__(self, atoms, mass, q_ini, p_ini):
@@ -158,7 +159,6 @@ class Fragment(Molecule):
         self.overlap    = None
         self.rigid      = False
         self.euler_rot  = False
-        self.phase_samp = 'cosine'
         
 
     @classmethod
@@ -181,9 +181,8 @@ class Fragment(Molecule):
         req = kwargs.get('req', None)
         omega = kwargs.get('omega', None)
         diat = kwargs.get('diatom', None)
-        euler_rot = kwargs.get('euler_rot', False)
+        euler_rot = kwargs.get('euler_rot', True)
         rigid = kwargs.get('rigid', False)
-        phase_samp = kwargs.get('phase_samp', False)
 
 
         c9=1.0e8/0.5291772e0
@@ -210,7 +209,6 @@ class Fragment(Molecule):
         this.freq = [this.omega_diat]
         this.rigid  = rigid
         this.euler_rot = euler_rot
-        this.phase_samp = phase_samp
 
         return this 
 
@@ -219,9 +217,8 @@ class Fragment(Molecule):
         linear = kwargs.get('linear', False)
         Amp_modeanim = kwargs.get('Amp_modeanim', 30.0)
         is_eckart = kwargs.get('is_eckart', True)
-        euler_rot = kwargs.get('euler_rot', False)
+        euler_rot = kwargs.get('euler_rot', True)
         rigid = kwargs.get('rigid', False)
-        phase_samp = kwargs.get('phase_samp', False)
 
 
         natom, atoms, q_eq = parseXYZ(xyz)
@@ -256,7 +253,6 @@ class Fragment(Molecule):
         this.linear    = linear
         this.rigid     = rigid
         this.euler_rot = euler_rot
-        this.phase_samp = phase_samp
 
         return this
 
@@ -306,26 +302,32 @@ class Fragment(Molecule):
         return
 
     def Polyatom_Sampling(self, **kwargs):
-        phase_sampling = kwargs.get('phase_sampling', 'linear')
         verbosity = kwargs.get('verbosity', False)
         traj_index = kwargs.get('traj_index', -999)
+        jrot = kwargs.get('jrot', 0)
 
         if len(self.atoms) <= 2:
             raise ValueError("ERROR: Polyatom_Sample requires more than two atoms.")
 
         if self.rigid == False:
-            self.q, self.p = polyatom_vib_rot_sampling(mass=self.mass, atoms=self.atoms, q_eq=self.q_ini, ww=self.freq, L=self.Lmat,
+            self.q, self.p = polyatom_vibration_sampling(mass=self.mass, atoms=self.atoms, q_eq=self.q_ini, ww=self.freq, L=self.Lmat,
                                                    vib_modes=self.sampling, verbosity=verbosity, traj_index=traj_index)
+
 
         self.q, self.p = cenmass(self.q, self.p, self.mass)
 
+        #coordinate (self.q) does not change when we dress up the molecule with an angular momentum to rotate
+        self.p, angmom, intertia = polyatom_rotation_sampling(jrot=jrot, q_eq=self.q_ini, mass=self.mass, q=self.q, p=self.p)
 
+
+
+       #here we should add the vibration too
         evib = 0.0
-        erot = sum([angmom[i]**2/inertia[i]/2.0 for i in range(len(angmom))])
+        erot_eq = sum([angmom[i]**2/inertia[i]/2.0 for i in range(len(angmom))])
 
         self.erot     = erot
         self.vib      = evib
-        self.inertia  = inertia
+        self.inertia  = intertia
         self.angmom   = angmom
 
 
@@ -472,7 +474,6 @@ if __name__ == '__main__':
 
     rigid = False
     euler_rot = True
-    phase_sampling = 'linear'
     ngeom = 100
 
     fname_water = "water"
@@ -513,6 +514,7 @@ if __name__ == '__main__':
     print("water mass:  ", water.mass)
     print("water q:     ", water.q)
     print("water p:     ", water.q)
+    print()
     print("water sampling:")
     for i in water.sampling:
         print(i,":",water.sampling[i])

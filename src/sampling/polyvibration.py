@@ -1,6 +1,7 @@
 import numpy as np
 import random
 import math
+from utils.cenmass             import cenmass
 from normalmode.normalmode     import getNormalmode, print_frequencies
 from normalmode.nmodeprint     import print_normalmode
 from normalmode.eckart         import eckart_transform
@@ -124,7 +125,7 @@ def init_vib_rot_modes(freq, init_type='ZPE', temp=300.0, **kwargs):
 
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------
-def polyatom_vib_rot_sampling(wmass, atoms, q_eq, ww, L, vib_modes, **kwargs):
+def polyatom_vibration_sampling(mass, atoms, q_eq, ww, L, vib_modes, **kwargs):
     '''
      q_eq: equilbiriom coords
      ww: freq
@@ -140,6 +141,8 @@ def polyatom_vib_rot_sampling(wmass, atoms, q_eq, ww, L, vib_modes, **kwargs):
     bond_th_HX = kwargs.get('bond_th_HX', 1.4/0.5291772) # bond threshold in Angstrom for H-X, where X = any non H-atom
     bond_th_XX = kwargs.get('bond_th_XX', 2.0/0.5291772) # bond threshold in Angstrom for X-X bonds to be considered as a part of a fragment
     #------------------------------------------------------------------------------------------
+
+    wmass = np.repeat(mass, 3)
 
     energy = []
     nvib = []
@@ -196,15 +199,15 @@ def polyatom_vib_rot_sampling(wmass, atoms, q_eq, ww, L, vib_modes, **kwargs):
     v_cart_vib = np.matmul(L, np.transpose(v_norm))
     p_cart_vib = [wmass[i] * v_cart_vib[i] for i in range(len(v_cart_vib)) ]
 
-    q,p = cenmass(q_desc, p_desc, mass)
+    q,p = cenmass(q_cart_vib, p_cart_vib, mass)
 
-    q,p,ai,am = poly_rotation_init(jrot, q_eq, mass, q, p)
+    #q,p,ai,am = poly_rotation_init(jrot, q_eq, mass, q, p)
 
     #Randomly roteate the molecule about its center of mass
-    q,p = euler_rot(q, p)
+    #q,p = euler_rot(q, p)
 
 
-    return(q)
+    return(q,p)
 #-------------------------------------------------------------------------------------------
 
 

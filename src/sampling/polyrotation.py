@@ -54,54 +54,53 @@ def calcI(qq, w):
 
 
 
-def angmomcorr(qq, pp):
+def angular_momentum(q, p):
     am = [0.0,0.0,0.0]
-    for i in range(len(qq)//3):
+    for i in range(len(q)//3):
         jx = 3*i
         jy = 3*i+1
         jz = 3*i+2
-        am[0] += qq[jy]*pp[jz] - qq[jz]*pp[jy]
-        am[1] += qq[jz]*pp[jx] - qq[jx]*pp[jz]
-        am[2] += qq[jx]*pp[jy] - qq[jy]*pp[jx]
+        am[0] += q[jy]*p[jz] - q[jz]*p[jy]
+        am[1] += q[jz]*p[jx] - q[jx]*p[jz]
+        am[2] += q[jx]*p[jy] - q[jy]*p[jx]
     return am
 
-def poly_rotation_init(jrot, q_eq, mass, q, p):
-    ai,Iinv = calcI(q_eq, mass)
+def angmom_correction_after_vibrational_sampling(am_rot, q, p):
+    '''
+    To rotate the molecule after vibrational sampling
+    we have to take into account that the sampling 
+    generates distorted (non-equilbiriom molecule)
+    with a given momentum. These q,p coordinates
+    generate naturally an angular momentum
+    stemming from vibrations:
 
-    #angmom from rotation quantum numbers
-    amjr = math.sqrt(jrot * (jrot + 1))
+    Lvib = q x p
 
-  #set random direction for angular momentum
+    when we sample the vibration w.r.t a fix rotational
+    quantum numbmer or the corresponding angular momentum
+     
+    we would overshoot the magnitude of the angomom without
+    the correction w.r.t the vibrational angular momemtnum (Lvib)
 
-    theta = random.uniform(0, math.pi)
-    phi =  random.uniform(0, 2 * math.pi)
+    Hence, if we wish to do the rotational sampling with a fix Lrot
+    angular momentum the real angular momentum used in rotational
+    sampling must be (to start the trajectory according to Lrot): 
 
-    am = np.array([
-            amjr*sin(theta)*cos(phi),
-            amjr*sin(theta)*sin(phi),
-            amjr*cos(theta)
-         ])
+    Lsampling = Lrot - Lvib 
+    '''
+    #q and p must the coordinates after vibratinal sampling
+    am_vib = angular_momentum(q, p)
 
+    am_corred = am_rot - am_vib 
 
-    Erot = sum([am[i]**2/ai[i]/2.0 for i in range(len(am))])
+    return am_corrted
 
-    #print("Erot[cm-1] =" , Erot*c5, "  Erot[eV] =", Erot*c4)
-
-    #print('angmom before corr: ', am)
-
-    am -= np.array(angmomcorr(q,p))
-
-    #print('angmom after corr: ', am)
-    #print()
-
-    #calculate angular velocities
-
-    angvel = -np.matmul(Iinv, np.transpose(am))
+def add_rotational_momentum(angvel, mass, q, p):
 
     wx,wy,wz = angvel.tolist()
 
     ang = []
-    for i in range(len(q)//3):
+    for i in range(len(mass)):
         jx = 3*i
         jy = 3*i+1
         jz = 3*i+2
@@ -112,10 +111,48 @@ def poly_rotation_init(jrot, q_eq, mass, q, p):
                 wx*q[jy] - wy*q[jx]
               ])
 
+        #rotational momentum of the ith atom
         pang = mass[i] * ang
 
+        #add to the vibrational momentum the rotational one
         p[jx] -= pang[0]
         p[jy] -= pang[1]
         p[jz] -= pang[2]
-    return (q,p, ai, am)
+
+
+    return p
+
+
+
+
+def polyatom_rotation_sampling(jrot, mass, q, p):
+    ai,Iinv = calcI(q, mass)
+
+    #angmom from rotation quantum numbers
+    amrot = math.sqrt(jrot * (jrot + 1))
+
+    #set random direction for angular momentum
+    theta = random.uniform(0, math.pi)
+    phi =  random.uniform(0, 2*math.pi)
+
+    am = np.array([
+            amrot*sin(theta)*cos(phi),
+            amrot*sin(theta)*sin(phi),
+            amrot*cos(theta)
+         ])
+
+
+    #Erot = sum([am[i]**2/ai[i]/2.0 for i in range(len(am))])
+    #print("Erot[cm-1] =" , Erot*c5, "  Erot[eV] =", Erot*c4)
+
+    am_corrected = angmom_correction_after_vibrational_sampling(am, q, p)
+
+    #calculate angular velocities (w) from the inverse of intertia tensor
+    # I * w = L   --->  I(-1) * L = w
+    angvel = -np.matmul(Iinv, np.transpose(am_corrected))
+
+    #Add rotational momentum to the vibrational one
+    p = add_rotational_momentum(angvel, mass, q, p)
+
+    return (p, ai, am)
 #asd
