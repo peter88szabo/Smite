@@ -91,9 +91,9 @@ def angmom_correction_after_vibrational_sampling(am_rot, q, p):
     #q and p must the coordinates after vibratinal sampling
     am_vib = angular_momentum(q, p)
 
-    am_corred = am_rot - am_vib 
+    am_corrected = am_rot - am_vib 
 
-    return am_corrted
+    return am_corrected
 
 def add_rotational_momentum(angvel, mass, q, p):
 
@@ -154,5 +154,5 @@ def polyatom_rotation_sampling(jrot, mass, q, p):
     #Add rotational momentum to the vibrational one
     p = add_rotational_momentum(angvel, mass, q, p)
 
-    return (p, ai, am)
+    return (p, am, am)
 #asd

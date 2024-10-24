@@ -66,7 +66,7 @@ class Molecule:
         self.q, self.p = velverlet(qchem, dt, self.wmass, self.q, self.p, self.atoms)
 
 
-    def verlet_multi_step(self, integrator, dt, qchem, file_wf, maxstep, iprint, traj_file):
+    def integrate_multi_step(self, integrator, dt, qchem, file_wf, maxstep, iprint, traj_file):
         # Initial energy
         T0, V0, E0 = Energy(qchem, file_wf, self.q, self.p, self.atoms, self.wmass)
 
@@ -321,7 +321,7 @@ class Fragment(Molecule):
 
        #here we should add the vibration too
         evib = 0.0
-        erot = sum([angmom[i]**2 / inertia[i]/2.0 for i in range(len(angmom))])
+        erot = sum([angmom[i]**2/inertia[i]/2.0 for i in range(len(angmom))])
 
         self.erot     = erot
         self.vib      = evib
@@ -493,15 +493,15 @@ if __name__ == '__main__':
     fix_temp    = [(5, 330.0),
                    (6, 430.0)]
 
-    fix_quantum_water = [(0, 6)]
+    fix_quantum_water = [(2, 6)]
 
-    water  = Fragment.Polyatom_Init(fname=fname_water, qchem=qcinput, xyz=xyz_water, random_rot=random_rot)
+    water  = Fragment.Polyatom_Init(fname=fname_water, qchem=qcinput, xyz=xyz_water, random_rot=True)
     #water.Specify_Polyatom_Sampling(init_type='ZPE', fix_quantum=fix_quantum, fix_energy=fix_energy)
     #water.Specify_Polyatom_Sampling(init_type='ZPE', fix_quantum=fix_quantum, fix_energy=fix_energy)
     water.Specify_Mode_Sampling(init_type='ZPE', fix_quantum=fix_quantum_water)
 
-    diene  = Fragment.Polyatom_Init(fname=fname_diene, qchem=qcinput, xyz=xyz_diene, random_rot=random_rot)
-    diene.Specify_Mode_Sampling(init_type='ZPE', fix_quantum=fix_quantum)
+    #diene  = Fragment.Polyatom_Init(fname=fname_diene, qchem=qcinput, xyz=xyz_diene)
+    #diene.Specify_Mode_Sampling(init_type='ZPE', fix_quantum=fix_quantum)
 
     #diatom = Fragment.Diatom_Init(atoms=['S','O'], diatom='SO')
     #diatom.Specify_Mode_Sampling(init_type='ZPE')
@@ -539,16 +539,13 @@ if __name__ == '__main__':
    #     os.remove(traj_file_diene)
    #     print(f"\n{traj_file_diene} already exists, it has been deleted to create a new one.\n")
 
-    if os.path.exists(traj_file_diene):
-        os.remove(traj_file_diene)
-        print(f"\n{traj_file_diene} already exists, it has been deleted to create a new one.\n")
 
-    print()
-    print("--------- Diene--------------------------------")
-    print()
-    with open(traj_file_diene, "a") as file_trj:
-        for igeom in range(ngeom):
-            diene.Polyatom_Sampling() #in kwargs can be given random_rot=False, rigid=True...
-            diene.print_structure(file_trj, igeom)
-    print("Diene done")
+    #print()
+    #print("--------- Diene--------------------------------")
+    #print()
+    #with open(traj_file_diene, "a") as file_trj:
+    #    for igeom in range(ngeom):
+    #        diene.Polyatom_Sampling() #in kwargs can be given random_rot=False, rigid=True...
+    #        diene.print_structure(file_trj, igeom)
+    #print("Diene done")
 
