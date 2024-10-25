@@ -34,10 +34,10 @@ def thermal_vibr_mode(temp, ome):
 #-------------------------------------------------------
 
 #------------------------------------------------------------------------------------------
-def initialize_vibrational_modes(freq, init_type='ZPE', temp=300.0, nvib=0, ene=0.0):
+def initialize_vibrational_modes(freq, init_vib_type='ZPE', temp=300.0):
 #------------------------------------------------------------------------------------------
     """
-    Initializes a dictionary with a given number of modes, each set to ('Q', nvib) or ('T', temp).
+    Initializes a dictionary with a given number of modes, each set to ('Q', nvib=0) or ('T', temp).
     each mode is initialized as a quantized mode with ZPE energy or according to a temperature
 
     freq: Frequencies of vibrational modes.
@@ -48,20 +48,16 @@ def initialize_vibrational_modes(freq, init_type='ZPE', temp=300.0, nvib=0, ene=
 
     nmodes = len(freq)
 
-    if init_type == 'ZPE':
+    if init_vib_type == 'ZPE':
         return {i: (freq[i], 'Q', 0) for i in range(nmodes)}
-    elif init_type == 'Qvib':
-        return {i: (freq[i], 'Q', nvib) for i in range(nmodes)}
-    elif init_type == 'Temp':
+    elif init_vib_type == 'Temp':
         return {i: (freq[i], 'T', temp) for i in range(nmodes)}
-    elif init_type == 'Ene':
-        return {i: (freq[i], 'E', ene) for i in range(nmodes)}
     else:
-        raise ValueError("init_type must be 'ZPE', 'Ene' or 'Temp'")
+        raise ValueError("init_type must be 'ZPE' or 'Temp'")
 #-------------------------------------------------------------------------------------------
 
 
-def specify_modes(vib_modes, **kwargs):
+def specify_vib_modes(vib_modes, **kwargs):
     """
     Sets the mode type and value for a given mode index.
 
@@ -108,20 +104,6 @@ def specify_modes(vib_modes, **kwargs):
                 vib_modes[mode_index] = (frequency, 'T', tempr)
 
     return vib_modes
-
-#--------------------------------------------------------------------------------------------------------------------------------------------------
-def init_vib_rot_modes(freq, init_type='ZPE', temp=300.0, **kwargs):
-#--------------------------------------------------------------------------------------------------------------------------------------------------
-    
-    #initialize all vibrational modes the same way (either with ZPE quantum state 'nvib = 0' or according to a temperature)
-    vib_modes = initialize_vibrational_modes(freq=freq, init_type=init_type, temp=temp)
-
-    #then if any specific mode is fixed (energy, quantum number or temperature), everything in kwargs:
-    if kwargs:
-        vib_modes = specify_modes(vib_modes, **kwargs)
-
-    return vib_modes
-#--------------------------------------------------------------------------------------------------------------------------------------------------
 
 
 #--------------------------------------------------------------------------------------------------------------------------------------------------

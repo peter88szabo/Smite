@@ -2,21 +2,21 @@ import numpy as np
 import os
 import math
 
-from utils.cenmass            import cenmass
-from utils.euler              import euler_rot          
-from utils.format_and_print   import parseXYZ
-from utils.format_and_print   import print_trajectory
-from utils.atomic_overlap     import check_atomic_overlap
-from utils.atomic_masses      import get_mass_vector 
+from utils.cenmass                import cenmass
+from utils.euler                  import euler_rot          
+from utils.format_and_print       import parseXYZ
+from utils.format_and_print       import print_trajectory
+from utils.atomic_overlap         import check_atomic_overlap
+from utils.atomic_masses          import get_mass_vector 
 
-from normalmode.hessian       import getHessian
-from normalmode.eckart        import eckart_transform
-from normalmode.nmodeprint    import print_normalmode 
-from normalmode.normalmode    import print_frequencies 
+from normalmode.hessian           import getHessian
+from normalmode.eckart            import eckart_transform
+from normalmode.nmodeprint        import print_normalmode 
+from normalmode.normalmode        import print_frequencies 
 
-from sampling.polyvibration   import init_vib_rot_modes
-from sampling.polyvibration   import polyatom_vibration_sampling
-from sampling.polyrotation    import polyatom_rotation_sampling
+from sampling.polyvibration       import polyatom_vibration_sampling
+from sampling.polyrotation        import polyatom_rotation_sampling
+from sampling.init_vib_rot_modes  import init_vib_rot_modes
 
 class Molecule:
     def __init__(self, atoms, mass, q_ini, p_ini):
@@ -147,18 +147,19 @@ class Fragment(Molecule):
     def __init__(self, atoms, mass, q_ini, p_ini):
 
         super().__init__(atoms, mass, q_ini, p_ini)
-        self.hessian    = None
-        self.Lmat       = None #Normal mode to Cartesian transformator (eigvec of Hessian)
-        self.freq       = None
-        self.fname      = None
-        self.hessFile   = None
-        self.sampling   = None
-        self.linear     = None
-        self.req_diat   = None
-        self.omega_diat = None
-        self.overlap    = None
-        self.rigid      = False
-        self.random_rot  = False
+        self.hessian      = None
+        self.Lmat         = None #Normal mode to Cartesian transformator (eigvec of Hessian)
+        self.freq         = None
+        self.fname        = None
+        self.hessFile     = None
+        self.vibsampling  = None
+        self.rotsampling  = None
+        self.linear       = None
+        self.req_diat     = None
+        self.omega_diat   = None
+        self.overlap      = None
+        self.rigid        = False
+        self.random_rot   = False
         
 
     @classmethod
@@ -275,12 +276,12 @@ class Fragment(Molecule):
 
         if self.rigid == False:
 
-            if self.sampling['Q']:
+            if self.vibsampling['Q']:
                 energy = self.omega_diat*(nvib + 0.5)
-            elif self.sampling['Q']:
+            elif self.vibsampling['T']:
                 nvib = thermal_vibr_mode(temp, self.omega_diat)
                 energy = self.omega_diat*(nvib + 0.5)
-            elif self.sampling['E']:
+            elif self.vibsampling['E']:
                 nvib = energy/self.omega_diat - 0.5 #non-integer quantum number
             else:
                 raise ValueError("Either nvib=xxx or temp=xxx or energy=xxx must be given as input in Diatom_Sampling")
@@ -297,9 +298,21 @@ class Fragment(Molecule):
 
         return
 
-    def Specify_Mode_Sampling(self, init_type, **kwargs):
-        self.sampling = init_vib_rot_modes(self.freq, init_type=init_type, **kwargs)
+    def Specify_Mode_Sampling(self, init_vib_type, init_rot_type, **kwargs):
+        self.vibsampling, self.rotsampling = init_vib_rot_modes(self.freq, init_vib_type=init_vib_type, init_rot_type=init_rot_type, **kwargs)
         return
+
+    def print_mode_sampling(self):
+        print(f"\n{self.fname}")
+        print("Vibrational mode sampling (Q: fixed quantum, E: fixed energy, T: thermal)")
+        print("mode freq   sampl  quantum")
+        for i in self.vibsampling:
+            print(i,":",self.vibsampling[i])
+        print(f"\nRotational mode sampling (Q: fixed quantum, E: fixed energy, T: thermal)")
+        print("mode  sampl  quantum")
+        for i in self.rotsampling:
+            print(i,":",self.rotsampling[i])
+        print()
 
     def Polyatom_Sampling(self, **kwargs):
         verbosity = kwargs.get('verbosity', False)
@@ -311,20 +324,20 @@ class Fragment(Molecule):
 
         if self.rigid == False:
             self.q, self.p = polyatom_vibration_sampling(mass=self.mass, atoms=self.atoms, q_eq=self.q_ini, ww=self.freq, L=self.Lmat,
-                                                   vib_modes=self.sampling, verbosity=verbosity, traj_index=traj_index)
+                                                   vib_modes=self.vibsampling, verbosity=verbosity, traj_index=traj_index)
 
 
         self.q, self.p = cenmass(self.q, self.p, self.mass)
 
         #coordinate (self.q) does not change when we dress up the molecule with an angular momentum to rotate
-        self.p, angmom, inertia = polyatom_rotation_sampling(jrot=jrot, mass=self.mass, q=self.q, p=self.p)
+        self.p, angmom, inertia = polyatom_rotation_sampling(rot_modes=self.rotsampling, mass=self.mass, q=self.q, p=self.p)
 
        #here we should add the vibration too
         evib = 0.0
         erot = sum([angmom[i]**2 / inertia[i]/2.0 for i in range(len(angmom))])
 
         self.erot     = erot
-        self.vib      = evib
+        self.vib      = evib #the vibrational that Evib = Etot - Erot
         self.inertia  = inertia
         self.angmom   = angmom
 
@@ -481,8 +494,6 @@ if __name__ == '__main__':
     traj_file_diene = "traj_" + fname_diene + ".xyz"
 
 
-
-
     fix_quantum = [(34, 6),
                    (35, 8)]
 
@@ -496,15 +507,10 @@ if __name__ == '__main__':
     fix_quantum_water = [(0, 6)]
 
     water  = Fragment.Polyatom_Init(fname=fname_water, qchem=qcinput, xyz=xyz_water, random_rot=random_rot)
-    #water.Specify_Polyatom_Sampling(init_type='ZPE', fix_quantum=fix_quantum, fix_energy=fix_energy)
-    #water.Specify_Polyatom_Sampling(init_type='ZPE', fix_quantum=fix_quantum, fix_energy=fix_energy)
-    water.Specify_Mode_Sampling(init_type='ZPE', fix_quantum=fix_quantum_water)
+    water.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum_water)
 
     diene  = Fragment.Polyatom_Init(fname=fname_diene, qchem=qcinput, xyz=xyz_diene, random_rot=random_rot)
-    diene.Specify_Mode_Sampling(init_type='ZPE', fix_quantum=fix_quantum)
-
-    #diatom = Fragment.Diatom_Init(atoms=['S','O'], diatom='SO')
-    #diatom.Specify_Mode_Sampling(init_type='ZPE')
+    diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum)
 
     print("----------------------------------------")
     print()
@@ -513,17 +519,7 @@ if __name__ == '__main__':
     print("water q:     ", water.q)
     print("water p:     ", water.q)
     print()
-    print("water sampling:")
-    for i in water.sampling:
-        print(i,":",water.sampling[i])
-
-    #print()
-    #print("diatom atoms: ", diatom.atoms)
-    #print("diatom mass:  ", diatom.mass)
-    #print("diatom q:     ", diatom.q)
-    #print("diatom p:     ", diatom.p)
-    #print("----------------------------------------")
-
+    water.print_mode_sampling()
 
     if os.path.exists(traj_file_water):
         os.remove(traj_file_water)
@@ -545,7 +541,7 @@ if __name__ == '__main__':
 
     print()
     print("--------- Diene--------------------------------")
-    print()
+    diene.print_mode_sampling()
     with open(traj_file_diene, "a") as file_trj:
         for igeom in range(ngeom):
             diene.Polyatom_Sampling() #in kwargs can be given random_rot=False, rigid=True...

@@ -1,6 +1,13 @@
 import numpy as np
 import random
 import math
+
+from sampling.thermal   import thermal_rot_quantum_spherical_top
+from sampling.thermal   import thermal_rot_classic_spherical_top 
+from sampling.thermal   import thermal_rot_asymmetric_top_equipart 
+from sampling.thermal   import thermal_rot_symmetric_top 
+
+
 #from cenmass import cenmass
 #from euler import euler_rot
 #from thermal import thermal_vibr_mode  
@@ -21,6 +28,11 @@ c6=41.341105
 c9=1.0e8*c1
 #     [speed of light in atomic unit]
 c10=137.035999074
+
+
+c7 = 2625.5         # [Hartree] * c7 = [kJ/mol]
+
+Rgas = 8.3144598/1000.0/c7 #Hartree/K
 
 from math import sin, cos
 
@@ -119,17 +131,48 @@ def add_rotational_momentum(angvel, mass, q, p):
         p[jy] -= pang[1]
         p[jz] -= pang[2]
 
-
     return p
 
 
+def initialize_rotational_modes(init_rot_type='Jfix', temp=300.0, jrot=0, krot=0):
+    """
+    Each mode rotational mode is initialized as
+    a quantized mode with Fixed J quantum numer or w.r.t a temperature
+    """
+    nmodes = 1 #at the moment we have only one mode, later we can take care of k-rotors too
+
+    if init_rot_type == 'Jfix':
+        return {i: ('Q', jrot) for i in range(nmodes)}
+    elif init_rot_type == 'Temp':
+        return {i: ('T', temp) for i in range(nmodes)}
+    else:
+        raise ValueError("init_type must be 'Jfix' or 'Temp'")
 
 
-def polyatom_rotation_sampling(jrot, mass, q, p):
+
+def polyatom_rotation_sampling(rot_modes, mass, q, p):
+
+    #ai: principial moment inertia
+    #Iinv : inverse of the intertia tensor
     ai,Iinv = calcI(q, mass)
 
-    #angmom from rotation quantum numbers
-    amrot = math.sqrt(jrot * (jrot + 1))
+    #---------------------------------------------------------------------------------------
+    #obtain a rotational quantum number (fixed J, fixed energy or thermal sampling)
+    #---------------------------------------------------------------------------------------
+    sampling_mode = rot_modes[0][0] # it must be 'Q', 'E', 'T'
+    excitation = rot_modes[0][1] #it's either the Jrot quantum number, energy or temperature
+
+    if sampling_mode == 'Q':
+        jrot = excitation
+        amrot = math.sqrt(jrot * (jrot + 1))
+    elif sampling_mode == 'T':
+        RT = Rgas * excitation #excitation is the temperature here
+        amrot = thermal_rot_asymmetric_top_equipart(RT, ai) 
+    else:
+        raise ValueError("sampling_mode must be 'Q', 'T'")
+    #---------------------------------------------------------------------------------------
+
+
 
     #set random direction for angular momentum
     theta = random.uniform(0, math.pi)
@@ -154,5 +197,5 @@ def polyatom_rotation_sampling(jrot, mass, q, p):
     #Add rotational momentum to the vibrational one
     p = add_rotational_momentum(angvel, mass, q, p)
 
-    return (p, am, am)
+    return (p, am, ai)
 #asd
