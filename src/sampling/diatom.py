@@ -6,6 +6,8 @@ from utils.euler   import euler_rot
 
 
 def diatom_init_harm(req, omega, mass, jrot, nvib):
+    if len(mass) != 2:
+        raise ValueError("Lengths of mass vector in diatom() must be 2")
     q = []
     p = []
 

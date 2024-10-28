@@ -17,12 +17,15 @@ from normalmode.normalmode        import print_frequencies
 from sampling.polyvibration       import polyatom_vibration_sampling
 from sampling.polyrotation        import polyatom_rotation_sampling
 from sampling.init_vib_rot_modes  import init_vib_rot_modes
+from integrators.integrators      import velverlet
+from integrators.gradient         import Energy
 
 class Molecule:
     def __init__(self, atoms, mass, q_ini, p_ini):
         if len(mass) != len(atoms) or len(q_ini) != 3*len(atoms) or len(p_ini) != 3*len(atoms):
            raise ValueError("Lengths of inputs are not consistent.")
 
+        #self.nfix       = nfix 
         self.atoms      = atoms
         self.natom      = len(atoms)
         self.q_ini      = np.array(q_ini)  
@@ -62,30 +65,37 @@ class Molecule:
         self.q = rotate_fragment(self.atoms, self.q, atom_ax1=atom1, atom_ax2=atom2, auto_frag=True, rot_angle=theta,
                                  bond_th_HX = bond_th_HX, bond_th_XX = bond_th_XX)
 
-    def verlet_single_step(self, dt, qchem):
-        self.q, self.p = velverlet(qchem, dt, self.wmass, self.q, self.p, self.atoms)
+    ##wave function file should be generated automatically based on the name of molecule
+    #as it given in the qcinput dictionary
+    def get_energy(self):
+        file_wf = "wavevfuntion" #or it should be given as class variable from self.fname
+        return Energy(self.qchem, file_wf, self.q, self.p, self.atoms, self.wmass)
 
+    def verlet_single_step(self, dt):
+        self.q, self.p = velverlet(self.qchem, dt, self.wmass, self.q, self.p, self.atoms)
 
-    def verlet_multi_step(self, integrator, dt, qchem, file_wf, maxstep, iprint, traj_file):
+    def run_trajectory(self, integrator='verlet', dt=42.0, maxstep=100, iprint=2, traj_file='trajectory.xyz'):
+        file_wf = "wavevfuntion" #or it should be given as class variable from self.fname
+
         # Initial energy
-        T0, V0, E0 = Energy(qchem, file_wf, self.q, self.p, self.atoms, self.wmass)
+        T0, V0, E0 = self.get_energy() 
 
         with open(traj_file, "a") as file_trj:
             for istep in range(maxstep):
 
                 if integrator == 'verlet':
-                    self.q, self.p = velverlet(qchem, dt, self.wmass, self.q, self.p, self.atoms) #self.verlet_single_step(dt, qcinput)
+                    self.verlet_single_step(dt)
                 else:
                     raise ValueError("Only Verlet integrator is avaiable at the moment")
 
-                T, V, E = Energy(qchem, file_wf, self.q, self.p, self.atoms, self.wmass)
+                T, V, E = self.get_energy() 
 
                 act_temp = self.traj_temperature(0)
 
                 dE = E - E0
 
                 if iprint  > 0:
-                    print(istep, T, V, E, dE)
+                    print(istep, T, V, E, dE, act_temp)
                     print_trajectory(file_trj, self.atoms, self.q, self.p, V, dE, dt, istep)
 
     def traj_temperature(self, nfix):
@@ -287,6 +297,7 @@ class Fragment(Molecule):
                 raise ValueError("Either nvib=xxx or temp=xxx or energy=xxx must be given as input in Diatom_Sampling")
 
             jrot = 10
+            ####Rotation and vibration should be separated as in case of polyatom
             self.q, self.p = diatom_init_harm(self.req_diat, self.omega_diat, self.mass, jrot, nvib)
 
         else:
@@ -308,7 +319,7 @@ class Fragment(Molecule):
         print("mode freq   sampl  quantum")
         for i in self.vibsampling:
             print(i,":",self.vibsampling[i])
-        print(f"\nRotational mode sampling (Q: fixed quantum, E: fixed energy, T: thermal)")
+        print(f"\nRotational mode sampling (Q: fixed quantum, T: thermal)")
         print("mode  sampl  quantum")
         for i in self.rotsampling:
             print(i,":",self.rotsampling[i])
@@ -494,8 +505,8 @@ if __name__ == '__main__':
     traj_file_diene = "traj_" + fname_diene + ".xyz"
 
 
-    fix_quantum = [(34, 6),
-                   (35, 8)]
+    fix_quantum = [(34, 0),
+                   (35, 0)]
 
     fix_energy  = [(0, 0.0),
                    (1, 0.0),
@@ -510,7 +521,8 @@ if __name__ == '__main__':
     water.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum_water)
 
     diene  = Fragment.Polyatom_Init(fname=fname_diene, qchem=qcinput, xyz=xyz_diene, random_rot=random_rot)
-    diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum, fix_temp=fix_temp)
+    #diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum, fix_temp=fix_temp)
+    diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=520, fix_quantum=fix_quantum)
 
     print("----------------------------------------")
     print()
@@ -542,9 +554,32 @@ if __name__ == '__main__':
     print()
     print("--------- Diene--------------------------------")
     diene.print_mode_sampling()
+    #with open(traj_file_diene, "a") as file_trj:
+    #    for igeom in range(ngeom):
+    #        diene.Polyatom_Sampling() #in kwargs can be given random_rot=False, rigid=True...
+    #        diene.print_structure(file_trj, igeom)
+
+
+    nstep = 2000 
+    dt = 1.0*c6
+    diene.Polyatom_Sampling() #in kwargs can be given random_rot=False, rigid=True...
+    '''
     with open(traj_file_diene, "a") as file_trj:
-        for igeom in range(ngeom):
-            diene.Polyatom_Sampling() #in kwargs can be given random_rot=False, rigid=True...
-            diene.print_structure(file_trj, igeom)
+        for istep in range(nstep):
+            print(f"trajectory step: {istep}")
+            diene.verlet_single_step(dt)
+            diene.print_structure(file_trj, istep)
+    '''
+
+    integrator = 'verlet'
+    maxstep = 2000
+    iprint = 2
+    diene.run_trajectory(integrator=integrator, dt=dt, maxstep=maxstep, iprint=iprint, traj_file=traj_file_diene)
+
+
     print("Diene done")
+
+
+
+
 
