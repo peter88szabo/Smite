@@ -4,6 +4,7 @@ import math
 
 from utils.cenmass                import cenmass
 from utils.euler                  import euler_rot          
+from utils.format_and_print       import parseCheckPoint
 from utils.format_and_print       import parseXYZ
 from utils.format_and_print       import print_trajectory
 from utils.atomic_overlap         import check_atomic_overlap
@@ -74,29 +75,75 @@ class Molecule:
     def verlet_single_step(self, dt):
         self.q, self.p = velverlet(self.qchem, dt, self.wmass, self.q, self.p, self.atoms)
 
-    def run_trajectory(self, integrator='verlet', dt=42.0, maxstep=100, iprint=2, traj_file='trajectory.xyz'):
+    def run_trajectory(self, integrator='verlet', dt=42.0, startstep=0, maxstep=100, iprint=2, traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False, ):
         file_wf = "wavevfuntion" #or it should be given as class variable from self.fname
+
+        #--------------------------------------------------------------------------------------
+        if not restart:
+            print("\n*************************************************************************")
+            if os.path.exists(traj_file):
+                os.remove(traj_file)
+                print(f"{traj_file} already exisits, it has been deleted to create a new one.")
+            print("***************************************************************************")
+        #--------------------------------------------------------------------------------------
+
 
         # Initial energy
         T0, V0, E0 = self.get_energy() 
 
+        c5   = 219474.e0             # [Hartree]  * c5 = [cm-1]
+        c6   = 41.341105             # [fs]       * c6 = [time in au]
+        c7   = 2625.5                # [Hartree]  * c7 = [kJ/mol]
+
         with open(traj_file, "a") as file_trj:
-            for istep in range(maxstep):
+            for istep in range(startstep, maxstep):
+
+                if (iprint > 0 and istep % iprint == 0 and istep > startstep) or istep == 0:
+                    T, V, E = self.get_energy() 
+
+                    act_temp = self.traj_temperature(0)
+
+                    dE = E - E0
+                    print(f"step: {istep:<10d} time[fs]: {istep*dt/c6:<12.2f}  V: {V:<13.5f} E: {E:<13.5f} dE[cm-1]: {dE*c5:<12.3f} Temp[K]: {act_temp:<10.2f}")
+
+                    print_trajectory(file_trj, self.atoms, self.q, self.p, V, dE, dt, istep)
+
+                    backup_file=open(backfile,'w')
+                    print_trajectory(backup_file, self.atoms, self.q, self.p, V, dE, dt, istep)
+                    backup_file.close()
 
                 if integrator == 'verlet':
                     self.verlet_single_step(dt)
                 else:
                     raise ValueError("Only Verlet integrator is avaiable at the moment")
 
-                T, V, E = self.get_energy() 
+                tstop = False#test_to_stop(i, q, stopcond['atomA'], stopcond['atomB'], stopcond['rdist'])
 
-                act_temp = self.traj_temperature(0)
+                if tstop == True:
+                    print("\n Reactive event found")
+                    break
 
-                dE = E - E0
 
-                if iprint  > 0:
-                    print(istep, T, V, E, dE, act_temp)
-                    print_trajectory(file_trj, self.atoms, self.q, self.p, V, dE, dt, istep)
+    def sample_and_run_trajectory(self, integrator='verlet', dt=42.0, startstep=0, maxstep=100, iprint=2, traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False):
+        #---------------------------------------------
+        # Sample the internal motions of a fragment:
+        #---------------------------------------------
+        if self.natom == 1 and not restart:
+            self.Atom_Sampling()
+        elif self.natom == 2 and not restart:
+            self.Diatom_Sampling()
+        elif self.natom > 2 and not restart:
+            self.Polyatom_Sampling()
+        elif restart:
+            parseCheckPoint(backfile)
+        else:
+            raise ValueError("Wrong sampling option in sample_and_run_trajectory() function")
+
+
+        #---------------------------------------------
+        self.run_trajectory(integrator=integrator, dt=dt, startstep=startstep, maxstep=maxstep,
+                        iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=restart) 
+
 
     def traj_temperature(self, nfix):
         '''
@@ -357,6 +404,9 @@ class Fragment(Molecule):
         if self.random_rot == True:
             self.q, self.p = euler_rot(self.q, self.p)
 
+        self.p = np.array(self.p)
+        self.q = np.array(self.q)
+
         self.overlap = check_atomic_overlap(self.atoms, self.q)
 
         return
@@ -517,13 +567,14 @@ if __name__ == '__main__':
 
     fix_quantum_water = [(0, 6)]
 
-    water  = Fragment.Polyatom_Init(fname=fname_water, qchem=qcinput, xyz=xyz_water, random_rot=random_rot)
-    water.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum_water)
+    #water  = Fragment.Polyatom_Init(fname=fname_water, qchem=qcinput, xyz=xyz_water, random_rot=random_rot)
+    #water.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum_water)
 
     diene  = Fragment.Polyatom_Init(fname=fname_diene, qchem=qcinput, xyz=xyz_diene, random_rot=random_rot)
     #diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum, fix_temp=fix_temp)
     diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=520, fix_quantum=fix_quantum)
 
+    '''
     print("----------------------------------------")
     print()
     print("water atoms: ", water.atoms)
@@ -550,6 +601,8 @@ if __name__ == '__main__':
     if os.path.exists(traj_file_diene):
         os.remove(traj_file_diene)
         print(f"\n{traj_file_diene} already exists, it has been deleted to create a new one.\n")
+   
+    '''
 
     print()
     print("--------- Diene--------------------------------")
@@ -561,7 +614,7 @@ if __name__ == '__main__':
 
 
     nstep = 2000 
-    dt = 1.0*c6
+    dt = 0.5*c6
     diene.Polyatom_Sampling() #in kwargs can be given random_rot=False, rigid=True...
     '''
     with open(traj_file_diene, "a") as file_trj:
@@ -572,9 +625,12 @@ if __name__ == '__main__':
     '''
 
     integrator = 'verlet'
-    maxstep = 2000
+    maxstep = 1000
     iprint = 2
-    diene.run_trajectory(integrator=integrator, dt=dt, maxstep=maxstep, iprint=iprint, traj_file=traj_file_diene)
+    restart = False
+    backfile = "diene_backup.xyz"
+    startstep = 0
+    diene.sample_and_run_trajectory(integrator=integrator, dt=dt, startstep=startstep, maxstep=maxstep, iprint=iprint, traj_file=traj_file_diene, backfile=backfile, restart=restart)
 
 
     print("Diene done")
