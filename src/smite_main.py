@@ -22,11 +22,21 @@ from integrators.integrators      import velverlet
 from integrators.gradient         import Energy
 
 class Molecule:
-    def __init__(self, atoms, mass, q_ini, p_ini):
-        if len(mass) != len(atoms) or len(q_ini) != 3*len(atoms) or len(p_ini) != 3*len(atoms):
-           raise ValueError("Lengths of inputs are not consistent.")
+    def __init__(self, atoms=None, mass=None, q_ini=None, p_ini=None, nfix=0, restart=False, xyz_file_path=None):
+        if restart:
+            if not xyz_file_path:
+                raise ValueError("xyz_file_path must be provided when restart is True.")
+            try:
+                last_step, atoms, q_ini, p_ini = self.parseCheckPoint(xyz_file_path)
+                mass = get_mass_vector(atoms)  
+            except FileNotFoundError:
+                raise ValueError("!!!!!!!!!!!!!!! Backup file does not exist !!!!!!!!!!!!!!!!!!!")
+        else:
+            last_step = 0
+            if len(mass) != len(atoms) or len(q_ini) != 3 * len(atoms) or len(p_ini) != 3 * len(atoms):
+                raise ValueError("Lengths of inputs are not consistent.")  
 
-        #self.nfix       = nfix 
+        self.nfix       = nfix #fix number of degree of freedom 
         self.atoms      = atoms
         self.natom      = len(atoms)
         self.q_ini      = np.array(q_ini)  
@@ -37,6 +47,8 @@ class Molecule:
         self.wmass      = np.repeat(mass, 3)
         self.totmass    = np.sum(mass) 
         self.qchem      = None 
+        self.last_step  = last_step
+
 
     def center_of_mass(self):
         """
@@ -59,7 +71,7 @@ class Molecule:
         Rotate a fragment with theta angle about a bond
         """
         verbosity  = kwargs.get('verbosity', False)
-        traj_index =  kwargs.get('traj_index', -999)
+        traj_index = kwargs.get('traj_index', -999)
         bond_th_HX = kwargs.get('bond_th_HX', 1.4/0.5291772) # bond threshold in Angstrom for H-X, where X = any non H-atom
         bond_th_XX = kwargs.get('bond_th_XX', 2.0/0.5291772) # bond threshold in Angstrom for X-X bonds to be considered as a part of a fragment
 
@@ -104,13 +116,15 @@ class Molecule:
                     act_temp = self.traj_temperature(0)
 
                     dE = E - E0
-                    print(f"step: {istep:<10d} time[fs]: {istep*dt/c6:<12.2f}  V: {V:<13.5f} E: {E:<13.5f} dE[cm-1]: {dE*c5:<12.3f} Temp[K]: {act_temp:<10.2f}")
+                    print(f"step: {istep:<10d} time[fs]: {istep*dt/c6:<12.2f}  V[au]: {V:<13.5f} E[au]: {E:<13.5f} dE[cm-1]: {dE*c5:<12.3f} Temp[K]: {act_temp:<10.2f}")
 
                     print_trajectory(file_trj, self.atoms, self.q, self.p, V, dE, dt, istep)
-
+                    #--------------------------------------------------------------------------
+                    #Backup:
                     backup_file=open(backfile,'w')
                     print_trajectory(backup_file, self.atoms, self.q, self.p, V, dE, dt, istep)
                     backup_file.close()
+                    #--------------------------------------------------------------------------
 
                 if integrator == 'verlet':
                     self.verlet_single_step(dt)
@@ -124,6 +138,18 @@ class Molecule:
                     break
 
 
+    def restart_init(self, integrator='verlet', dt=42.0, startstep=0, maxstep=100, iprint=2, traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False):
+        if restart:
+            try:
+                last_step, self.atoms, self.q, self.p = parseCheckPoint(backfile)
+                self.mass = get_mass_vector(atoms)
+                startstep = last_step
+            except FileNotFoundError:
+                raise ValueError("!!!!!!!!!!!!!!! Backup file does not exist !!!!!!!!!!!!!!!!!!!")
+        else:
+            raise ValueError("Wrong sampling option in sample_and_run_trajectory() function")
+
+
     def sample_and_run_trajectory(self, integrator='verlet', dt=42.0, startstep=0, maxstep=100, iprint=2, traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False):
         #---------------------------------------------
         # Sample the internal motions of a fragment:
@@ -135,14 +161,13 @@ class Molecule:
         elif self.natom > 2 and not restart:
             self.Polyatom_Sampling()
         elif restart:
-            parseCheckPoint(backfile)
+            startstep = self.last_step
         else:
             raise ValueError("Wrong sampling option in sample_and_run_trajectory() function")
-
-
         #---------------------------------------------
+
         self.run_trajectory(integrator=integrator, dt=dt, startstep=startstep, maxstep=maxstep,
-                        iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=restart) 
+                            iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=restart) 
 
 
     def traj_temperature(self, nfix):
@@ -203,7 +228,7 @@ class Molecule:
 class Fragment(Molecule):
     def __init__(self, atoms, mass, q_ini, p_ini):
 
-        super().__init__(atoms, mass, q_ini, p_ini)
+        super().__init__(atoms=atoms, mass=mass, q_ini=q_ini, p_ini=p_ini)
         self.hessian      = None
         self.Lmat         = None #Normal mode to Cartesian transformator (eigvec of Hessian)
         self.freq         = None
@@ -229,7 +254,7 @@ class Fragment(Molecule):
 
         mass = get_mass_vector(atoms)
 
-        return cls(atoms, mass, q_ini, p_ini)
+        return cls(atoms=atoms, mass=mass, q_ini=q_ini, p_ini=p_ini)
 
     @classmethod
     def Diatom_Init(cls, atoms, **kwargs):
@@ -260,7 +285,7 @@ class Fragment(Molecule):
 
         q_ini, p_ini  = cenmass(q1+q2, p1+p2, mass)
 
-        this = cls(atoms, mass, q_ini, p_ini)
+        this = cls(atoms=atoms, mass=mass, q_ini=q_ini, p_ini=p_ini)
 
         this.req_diat = req
         this.omega_diat = omega*c10/c9*(math.pi * 2)
@@ -300,16 +325,16 @@ class Fragment(Molecule):
 
         print_frequencies(fname,freq_all)
 
-        this = cls(atoms, mass, q_eq, p_ini)
+        this = cls(atoms=atoms, mass=mass, q_ini=q_eq, p_ini=p_ini)
 
-        this.fname     = fname
-        this.hessFile  = hessFile
-        this.hessian   = hessian
-        this.freq      = freq
-        this.Lmat      = Lmat
-        this.qchem     = qchem
-        this.linear    = linear
-        this.rigid     = rigid
+        this.fname      = fname
+        this.hessFile   = hessFile
+        this.hessian    = hessian
+        this.freq       = freq
+        this.Lmat       = Lmat
+        this.qchem      = qchem
+        this.linear     = linear
+        this.rigid      = rigid
         this.random_rot = random_rot
 
         return this
@@ -625,12 +650,15 @@ if __name__ == '__main__':
     '''
 
     integrator = 'verlet'
-    maxstep = 1000
+    maxstep = 100 
     iprint = 2
     restart = False
     backfile = "diene_backup.xyz"
     startstep = 0
-    diene.sample_and_run_trajectory(integrator=integrator, dt=dt, startstep=startstep, maxstep=maxstep, iprint=iprint, traj_file=traj_file_diene, backfile=backfile, restart=restart)
+    diene.sample_and_run_trajectory(integrator=integrator, dt=dt, maxstep=maxstep, iprint=iprint, traj_file=traj_file_diene, backfile=backfile, restart=restart)
+
+
+
 
 
     print("Diene done")

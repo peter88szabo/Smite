@@ -87,7 +87,7 @@ def parseCheckPoint(xyz_file_path):
     q = np.array(q)
     p = np.array(p)
 
-    return last_step, Natoms, atoms, q, p
+    return last_step, atoms, q, p
 
 
 def makeXYZ(atoms, q):
