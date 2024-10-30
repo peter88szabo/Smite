@@ -25,7 +25,7 @@ class Molecule:
     def __init__(self, atoms=None, mass=None, q_ini=None, p_ini=None, nfix=0, restart=False, xyz_file_path=None):
         if restart:
             if not xyz_file_path:
-                raise ValueError("xyz_file_path must be provided when restart is True.")
+                raise ValueError("Backup file must be provided when restart is True.")
             try:
                 last_step, atoms, q_ini, p_ini = self.parseCheckPoint(xyz_file_path)
                 mass = get_mass_vector(atoms)  
