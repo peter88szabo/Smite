@@ -1,12 +1,14 @@
 import numpy as np
 import math
 import random
-from cenmass import cenmass
+from utils.cenmass import cenmass
 
-def setRelativeInitCoords(Ecoll, bmax, Rini, atomA, atomB, massA, massB, qA, qB, pA, pB):
-    bimp = bmax * math.sqrt(random.uniform(0.0,1.0))
+def setRelativeInitCoords(Ecoll=0.1, Ecoll_thermal=False, bmax=8.0, bsampling=False, temp=300.0, Rini=18.0, massA, massB, qA, qB, pA, pB):
+    if bsampling:
+        bimp = bmax * math.sqrt(random.uniform(0.0,1.0))
+    else:
+        bimp = bmax #fix impact parameter for opacity function P(b) calculations
     sepx = math.sqrt(Rini*Rini - bimp*bimp)
-
 
    #shif the A and B molecule to their center of mass:
     qA, pA = cenmass(qA, pA, massA)
@@ -36,7 +38,5 @@ def setRelativeInitCoords(Ecoll, bmax, Rini, atomA, atomB, massA, massB, qA, qB,
 
     q = np.append(qA, qB)
     p = np.append(pA, pB)
-    mass = np.append(massA, massB)
-    atoms = atomA + atomB #this is just simple array, not numpy
 
-    return(q,p, atoms, mass, bimp)
+    return(bimp, q, p)

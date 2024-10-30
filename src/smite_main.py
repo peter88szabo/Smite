@@ -18,6 +18,9 @@ from normalmode.normalmode        import print_frequencies
 from sampling.polyvibration       import polyatom_vibration_sampling
 from sampling.polyrotation        import polyatom_rotation_sampling
 from sampling.init_vib_rot_modes  import init_vib_rot_modes
+from sampling.thermal             import thermal_collision_energy
+
+
 from integrators.integrators      import velverlet
 from integrators.gradient         import Energy
 
@@ -247,7 +250,7 @@ class Fragment(Molecule):
     @classmethod
     def Atom_Init(cls, atoms):
         if len(atoms) != 1:
-            raise ValueError("ERROR: Atom_Init requires only a single atom.")
+            raise ValueError("ERROR: Atom_Init requires only a single atom. You must provide an array with a single element, for instance: ['Cl']")
 
         q_ini = np.array([0.0, 0.0 , 0.0])
         p_ini = np.array([0.0, 0.0 , 0.0])
@@ -340,7 +343,7 @@ class Fragment(Molecule):
         return this
 
     def Atom_Sampling(self):
-        if len(atoms) != 1:
+        if len(self.atoms) != 1:
             raise ValueError("ERROR: Atom_Sampling requires only a single atom.")
 
         self.q = np.array([0.0, 0.0 , 0.0])
@@ -348,7 +351,7 @@ class Fragment(Molecule):
         return
 
     def Diatom_Sampling(self, **kwargs):
-        if len(atoms) != 2:
+        if len(self.atoms) != 2:
             raise ValueError("ERROR: DiatomHaromicInit accept only a diatomic molecule.")
 
         verbosity = kwargs.get('verbosity', False)
@@ -400,7 +403,6 @@ class Fragment(Molecule):
     def Polyatom_Sampling(self, **kwargs):
         verbosity = kwargs.get('verbosity', False)
         traj_index = kwargs.get('traj_index', -999)
-        jrot = kwargs.get('jrot', 0)
 
         if len(self.atoms) <= 2:
             raise ValueError("ERROR: Polyatom_Sample requires more than two atoms.")
@@ -434,41 +436,107 @@ class Fragment(Molecule):
 
         self.overlap = check_atomic_overlap(self.atoms, self.q)
 
+        if self.overlap:
+            raise ValueError("Overlap detected when the polyatomic fragment is sampled")
+
         return
 
 
-class Reaction(Molecule):
-    def __init__(self, fragment_A, fragment_B, Rdist):
-        super().__init__(atoms, mass, q_ini, p_ini)
+class Collision(Molecule):
+    def __init__(self, fragment_A, fragment_B, qchem):
+        atoms = fragment_A.atoms + fragment_B.atoms
+        mass = np.append(fragment_A.mass, fragment_B.mass)
+        q_ini = np.append(fragment_A.q_ini, fragment_B.q_ini)
+        p_ini = np.append(fragment_A.p_ini, fragment_B.p_ini)
+
+        super().__init__(atoms=atoms, mass=mass, q_ini=q_ini, p_ini=p_ini)
+        self.qchem = qchem
+        self.Rini = None
+        self.bmax = None
+        self.bsampling = None
+        self.bimp = None
+        self.Ecoll = None
+        self.Ecoll_thermal = None
+        self.tempcoll = None
+        self.redmass = 0.0
         self.fragment_A = fragment_A
         self.fragment_B = fragment_B
-        self.atoms = fragment_A.atoms + fragment_B.atoms
-        self.mass = np.append(fragment_A.mass, fragment_B.mass)
-        self.q_ini = np.append(fragment_A.q_ini, fragment_B.q_ini)
-        self.p_ini = np.append(fragment_A.p_ini, fragment_B.p_ini)
+        self.sampling_set = False
+
+    def Specify_Collision_Sampling(self, Rini=None, bmax=None, bsampling=False, Ecoll=None, Ecoll_thermal=False, temp=None):
+
+        if Rini == None or bmax == None or (Ecoll == None and Ecoll_thermal==False) or (Ecoll_thermal==True and temp==None):
+            raise ValueError("Rini, bmax and Ecoll (or Ecoll_thermal) must be give in the input of Specify_Collision_Sampling()")
+
+        self.Rini = Rini
+        self.bmax = bmax
+        self.bsampling = bsampling
+        self.Ecoll = Ecoll
+        self.Ecoll_thermal = Ecoll_thermal
+        self.tempcoll = temp
+        self.sampling_set = True
     
-    def Set_Relative_Init_Coords(self, Rdist):
+    def Set_Relative_Init_Coords(self):
+
+        if self.sampling_set == False:
+            raise ValueError("Error: First you must call Specify_Collision_Sampling() after you initialized the Collision() class")
+
 
         #shif the A and B molecule to their center of mass:
-        qA = cenmassQ(self.fragment_A.q, self.fragment_A.mass)
-        qB = cenmassQ(self.fragment_B.q, self.fragment_B.mass)
+        qA, pA = cenmass(self.fragment_A.q, self.fragment_A.p, self.fragment_A.mass)
+        qB, pB = cenmass(self.fragment_B.q, self.fragment_B.p, self.fragment_B.mass)
 
-        #shift fragment B along the z-axis
-        for i in range(len(massB)):
+
+        if self.Ecoll_thermal:
+            Rgas = (8.3144598/1000.0/2625.5) #in Hartree/K
+            RT = Rgas * self.tempcoll
+            self.Ecoll = thermal_collision_energy(RT) 
+            print("temp, Ecoll: ", self.tempcoll, self.Ecoll)
+
+        if self.Ecoll == None or self.bmax == None or self.Rini == None:
+            raise ValueError("Ecoll (unless it's thermall sampled), bmax and Rini must be given in the input of Set_Relative_Init_Coords()")
+
+        if self.bsampling:
+            self.bimp = self.bmax * math.sqrt(random.uniform(0.0,1.0))
+        else:
+            self.bimp = self.bmax #fix impact parameter for opacity function P(b) calculations
+        sepx = math.sqrt(self.Rini * self.Rini - self.bimp*self.bimp)
+
+        #shift fragment B along the x-axis with sepx (separation along x-axis)
+        #and shifted along the z-axis with bimp(impact paramter)
+        for i in range(len(self.fragment_B.mass)):
             jx = 3 * i
             jy = 3 * i + 1
             jz = 3 * i + 2
-            fragment_B.q[jz] += Rdist 
+            qB[jx] += sepx 
+            qB[jz] += self.bimp 
 
-        #wA = self.fragment_A.totmass
-        #wB = self.fragment_B.totmass
+        wA = self.fragment_A.totmass
+        wB = self.fragment_B.totmass
 
-        self.q = np.append(fragment_A.q, fragment_B.q)
-        atoms = fragment_A.atom + fragment_B.atom  #this is just simple array, not numpy
+        redmass = wA*wB/(wA+wB)
+
+        velRel = math.sqrt(2.0*self.Ecoll/redmass)
+        velA = velRel*wB / (wA+wB)
+        velB = velA - velRel
+
+        #it has only velocity along the X-axis
+        for i in range(len(self.fragment_A.mass)):
+            jx = 3 * i
+            pA[jx] += velA * self.fragment_A.mass[i]
+
+        for i in range(len(self.fragment_B.mass)):
+            jx = 3 * i
+            pB[jx] += velB * self.fragment_B.mass[i]
+
+
+        self.q = np.append(qA, qB)
+        self.p = np.append(pA, pB)
+        self.redmass = redmass
 
         return 
 
-    def Sample_Bimolecular_Reactants(self, Rdist, bmax, bsampling):
+    def Sample_Bimolecular_Reactants(self, **kwargs):
         #---------------------------------------------
         # Sample the internal motions of a fragment:
         #---------------------------------------------
@@ -476,19 +544,30 @@ class Reaction(Molecule):
             if fragment.natom == 1:
                 fragment.Atom_Sampling()
             elif fragment.natom == 2:
-                fragment.Diatom_Sampling()
+                fragment.Diatom_Sampling(**kwargs)
             else:
-                fragment.Polyatom_Sampling()
+                fragment.Polyatom_Sampling(**kwargs)
         #---------------------------------------------
 
         sample_fragment(self.fragment_A)
         sample_fragment(self.fragment_B)
 
-        self.Set_Relative_Init_Coords(Rdist)
+        self.Set_Relative_Init_Coords()
 
         self.overlap = check_atomic_overlap(self.atoms, self.q)
 
+        if self.overlap:
+            raise ValueError("Error: Overlap detected during the initialization of the bimolecular reaction!")
+
         return
+
+    def sample_and_run_collision(self, integrator='verlet', dt=42.0, startstep=0, maxstep=100, iprint=2,
+                                      traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False, **kwargs):
+
+        self.Sample_Bimolecular_Reactants(**kwargs)
+
+        self.run_trajectory(integrator=integrator, dt=dt, startstep=startstep, maxstep=maxstep,
+                            iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=restart)
 
 
         
@@ -595,9 +674,9 @@ if __name__ == '__main__':
     #water  = Fragment.Polyatom_Init(fname=fname_water, qchem=qcinput, xyz=xyz_water, random_rot=random_rot)
     #water.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum_water)
 
-    diene  = Fragment.Polyatom_Init(fname=fname_diene, qchem=qcinput, xyz=xyz_diene, random_rot=random_rot)
+    diene  = Fragment.Polyatom_Init(fname=fname_diene, qchem=qcinput, xyz=xyz_diene, random_rot=True)
     #diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum, fix_temp=fix_temp)
-    diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=520, fix_quantum=fix_quantum)
+    diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
 
     '''
     print("----------------------------------------")
@@ -640,7 +719,7 @@ if __name__ == '__main__':
 
     nstep = 2000 
     dt = 0.5*c6
-    diene.Polyatom_Sampling() #in kwargs can be given random_rot=False, rigid=True...
+    #diene.Polyatom_Sampling() #in kwargs can be given random_rot=False, rigid=True...
     '''
     with open(traj_file_diene, "a") as file_trj:
         for istep in range(nstep):
@@ -655,14 +734,52 @@ if __name__ == '__main__':
     restart = False
     backfile = "diene_backup.xyz"
     startstep = 0
-    diene.sample_and_run_trajectory(integrator=integrator, dt=dt, maxstep=maxstep, iprint=iprint, traj_file=traj_file_diene, backfile=backfile, restart=restart)
-
-
-
-
+    #diene.sample_and_run_trajectory(integrator=integrator, dt=dt, maxstep=maxstep, iprint=iprint, traj_file=traj_file_diene, backfile=backfile, restart=restart)
 
     print("Diene done")
 
+
+    clorine = Fragment.Atom_Init(atoms=['Cl'])
+    fname_atom = 'Cl'
+
+    print("\nCl atom:")
+    print("atoms: ",  clorine.atoms)
+    print("mass:  ",  clorine.mass)
+    print("q:     ",  clorine.q)
+    print("p:     ",  clorine.p)
+    print()
+
+    print("\nReaction of Diene + Cl")
+    print()
+
+    reaction =  Collision(diene, clorine, qchem=qcinput) 
+    reaction.Specify_Collision_Sampling(Rini=12.0, bmax=6.0, bsampling=True, Ecoll=None, Ecoll_thermal=True, temp=2000.0)
+
+    print("\nDiene + Cl reaction:")
+    print("atoms: ",  reaction.atoms)
+    print("mass: ",  reaction.atoms)
+    print("p: ",  reaction.p)
+    print("q: ",  reaction.q)
+
+
+    reaction.Sample_Bimolecular_Reactants()
+
+    print("\nAfter sampling Diene + Cl reaction:")
+    print("p: ",  reaction.p)
+    print("q: ",  reaction.q)
+
+
+    dt = 0.5*c6
+    restart = False
+    backfile = "reaction_backup.xyz"
+    traj_file_reaction = "traj_" + fname_diene + "+" + fname_atom + ".xyz"
+
+
+    reaction.sample_and_run_collision(integrator='verlet', dt=dt, maxstep=1000, iprint=2, traj_file=traj_file_reaction, backfile=backfile)
+
+
+
+   
 
 
 
