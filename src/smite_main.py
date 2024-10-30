@@ -113,7 +113,7 @@ class Molecule:
                 if (iprint > 0 and istep % iprint == 0 and istep > startstep) or istep == 0:
                     T, V, E = self.get_energy() 
 
-                    act_temp = self.traj_temperature(0)
+                    act_temp = self.traj_temperature()
 
                     dE = E - E0
                     print(f"step: {istep:<10d} time[fs]: {istep*dt/c6:<12.2f}  V[au]: {V:<13.5f} E[au]: {E:<13.5f} dE[cm-1]: {dE*c5:<12.3f} Temp[K]: {act_temp:<10.2f}")
@@ -170,7 +170,7 @@ class Molecule:
                             iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=restart) 
 
 
-    def traj_temperature(self, nfix):
+    def traj_temperature(self):
         '''
         Actual temperature of the system
 
@@ -186,7 +186,7 @@ class Molecule:
        #kinetic energy of the system
         Ekin=sum(self.p*self.p/self.wmass)*0.5
 
-        return 2.0*Ekin/float(len(self.p)-nfix)/Rgas
+        return 2.0*Ekin/float(len(self.p)-self.nfix)/Rgas
 
 
     def merge_with(self, other_molecule):
