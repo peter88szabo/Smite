@@ -19,6 +19,8 @@ from sampling.polyvibration       import polyatom_vibration_sampling
 from sampling.polyrotation        import polyatom_rotation_sampling
 from sampling.init_vib_rot_modes  import init_vib_rot_modes
 from sampling.thermal             import thermal_collision_energy
+from sampling.diatom              import diatom_rotation_rigidrot_sampling
+from sampling.diatom              import diatom_vibration_harmonic_sampling 
 
 
 from integrators.integrators      import velverlet
@@ -153,7 +155,8 @@ class Molecule:
             raise ValueError("Wrong sampling option in sample_and_run_trajectory() function")
 
 
-    def sample_and_run_trajectory(self, integrator='verlet', dt=42.0, startstep=0, maxstep=100, iprint=2, traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False):
+    def sample_and_run_trajectory(self, integrator='verlet', dt=42.0, startstep=0, maxstep=100, iprint=2,
+                                  traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False):
         #---------------------------------------------
         # Sample the internal motions of a fragment:
         #---------------------------------------------
@@ -266,35 +269,51 @@ class Fragment(Molecule):
 
         req = kwargs.get('req', None)
         omega = kwargs.get('omega', None)
-        diat = kwargs.get('diatom', None)
+        alpha = kwargs.get('alpha', None)
+        De = kwargs.get('De', None)
         random_rot = kwargs.get('random_rot', True)
         rigid = kwargs.get('rigid', False)
+        diatom = kwargs.get('diatom', None)
+  
+        if req is None and rigid: 
+            raise ValueError("ERROR: For rigid diatom req must be given in Diatom_Init()")
+        elif (req is None and omega is None) and not rigid and diatom == 'harmonic': 
+            raise ValueError("ERROR: For non-rigid harmonic diatom req and omega must be given in Diatom_Init()")
+        elif (req is None and alpha is None and De is None) and not rigid and diatom == 'morse': 
+            raise ValueError("ERROR: For non-rigid Morse diatom req, alpha, De must be given in Diatom_Init()")
+        elif not rigid and diatom == None: 
+            raise ValueError("ERROR: non-rigid diatom must be specified: diatom = 'harmonic or 'morse'')")
 
 
         c9=1.0e8/0.5291772e0
         c10=137.035999074
 
-        if req in kwargs and omega in kwargs:
-            print("Parameters of diatom are defined by the user: req[Angstrom]={req} and omega[cm-1]={omega}")
-        else:
-            raise ValueError("ERROR: Diatom_Init needs (req[Angstrom] and omega[cm-1]) or diatom='XY' as input")
-
         mass = get_mass_vector(atoms)
 
-        q1 = [req, 0.0, 0.0]
-        q2 = [0.0, 0.0, 0.0]
-        p1 = [0.0, 0.0, 0.0]
-        p2 = [0.0, 0.0, 0.0]
+        q1 = np.array([req, 0.0, 0.0])
+        q2 = np.zeros(3)
+        p1 = np.zeros(3)
+        p2 = np.zeros(3)
 
-        q_ini, p_ini  = cenmass(q1+q2, p1+p2, mass)
+        q_ini = np.append(q1, q2)
+        p_ini = np.append(p1, p2)
+
+        q_ini, p_ini  = cenmass(q_ini, p_ini, mass)
 
         this = cls(atoms=atoms, mass=mass, q_ini=q_ini, p_ini=p_ini)
 
         this.req_diat = req
         this.omega_diat = omega*c10/c9*(math.pi * 2)
+        this.alpha_diat = alpha
+        this.De_diat = De
         this.freq = [this.omega_diat]
         this.rigid  = rigid
+        this.rigid  = diatom
         this.random_rot = random_rot
+        this.nvib = 0
+        this.jvib = 0
+        this.vibsampling = None
+        this.rotsampling = None
 
         return this 
 
@@ -360,32 +379,30 @@ class Fragment(Molecule):
         redmass = self.mass[0]*self.mass[1] / (self.mass[0] + self.mass[1])
 
         if self.rigid == False:
+            self.q, self.p = diatom_vibration_harmonic_sampling(self.vib_modes, self.req_diat, self.omega_diat, self.mass) 
 
-            if self.vibsampling['Q']:
-                energy = self.omega_diat*(nvib + 0.5)
-            elif self.vibsampling['T']:
-                nvib = thermal_vibr_mode(temp, self.omega_diat)
-                energy = self.omega_diat*(nvib + 0.5)
-            elif self.vibsampling['E']:
-                nvib = energy/self.omega_diat - 0.5 #non-integer quantum number
-            else:
-                raise ValueError("Either nvib=xxx or temp=xxx or energy=xxx must be given as input in Diatom_Sampling")
+        self.q, self.p = cenmass(self.q, self.p, self.mass)
 
-            jrot = 10
-            ####Rotation and vibration should be separated as in case of polyatom
-            self.q, self.p = diatom_init_harm(self.req_diat, self.omega_diat, self.mass, jrot, nvib)
+        self.p, angmom, inertia = diatom_rotation_rigidrot_sampling(self.rot_modes, self.mass, self.q, self.p)
 
-        else:
-            self.q = self.q_ini
-            self.p = 0.0 #here we should add the option for rigid rotation. Everthing is built in above, we should separate it
+        self.inertia  = inertia
+        self.angmom   = angmom
 
         if self.random_rot == True:
             self.q, self.p = euler_rot(self.q, self.p)
 
         return
 
-    def Specify_Mode_Sampling(self, init_vib_type, init_rot_type, **kwargs):
-        self.vibsampling, self.rotsampling = init_vib_rot_modes(self.freq, init_vib_type=init_vib_type, init_rot_type=init_rot_type, **kwargs)
+
+
+
+    def Specify_Mode_Sampling(self, init_vib_type='ZPE', init_rot_type='Jfix', **kwargs):
+        if len(self.atoms) = 2:
+            self.vibsampling, self.rotsampling = init_vib_rot_modes(freq=[self.omega_diat], init_vib_type=init_vib_type, init_rot_type=init_rot_type, **kwargs)
+        elif len(self.atoms) > 2:
+            self.vibsampling, self.rotsampling = init_vib_rot_modes(self.freq, init_vib_type=init_vib_type, init_rot_type=init_rot_type, **kwargs)
+        else
+            raise ValueError("Does not make sense to call this Specify_Mode_Sampling() function with a single atom!!!")
         return
 
     def print_mode_sampling(self):
@@ -608,7 +625,7 @@ if __name__ == '__main__':
       H      -1.462101      0.924083     -1.042665
      '''
 
-    seed = 211422
+    seed = 320422
     random.seed(seed)
 
     qcinput = {
@@ -752,8 +769,21 @@ if __name__ == '__main__':
     print("\nReaction of Diene + Cl")
     print()
 
+    qcinput = {
+    'qchem': 'XTB',
+    'path': '/home/peter/orca_6_0_0/xtb',
+    'nproc': 8,
+    'functional': '',
+    'basis': '',
+    'charge': 0,
+    'multiplicity': 2,
+    'additional': '--acc 10',
+    'wfu': False
+    }
+
+
     reaction =  Collision(diene, clorine, qchem=qcinput) 
-    reaction.Specify_Collision_Sampling(Rini=12.0, bmax=6.0, bsampling=True, Ecoll=None, Ecoll_thermal=True, temp=2000.0)
+    reaction.Specify_Collision_Sampling(Rini=12.0, bmax=6.0, bsampling=True, Ecoll=None, Ecoll_thermal=True, temp=300.0)
 
     print("\nDiene + Cl reaction:")
     print("atoms: ",  reaction.atoms)
@@ -769,13 +799,13 @@ if __name__ == '__main__':
     print("q: ",  reaction.q)
 
 
-    dt = 0.5*c6
+    dt = 0.8*c6
     restart = False
     backfile = "reaction_backup.xyz"
     traj_file_reaction = "traj_" + fname_diene + "+" + fname_atom + ".xyz"
 
 
-    reaction.sample_and_run_collision(integrator='verlet', dt=dt, maxstep=1000, iprint=2, traj_file=traj_file_reaction, backfile=backfile)
+    reaction.sample_and_run_collision(integrator='verlet', dt=dt, maxstep=3000, iprint=2, traj_file=traj_file_reaction, backfile=backfile)
 
 
 
