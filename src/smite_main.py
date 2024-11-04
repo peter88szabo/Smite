@@ -9,6 +9,7 @@ from utils.format_and_print       import parseXYZ
 from utils.format_and_print       import print_trajectory
 from utils.atomic_overlap         import check_atomic_overlap
 from utils.atomic_masses          import get_mass_vector 
+from utils.distance               import test_to_stop
 
 from normalmode.hessian           import getHessian
 from normalmode.eckart            import eckart_transform
@@ -668,7 +669,7 @@ if __name__ == '__main__':
      '''
 
 
-    seed = 220422
+    seed = 220922
     random.seed(seed)
 
     qcinput = {
@@ -679,7 +680,7 @@ if __name__ == '__main__':
     'basis': '',
     'charge': 0,
     'multiplicity': 2,
-    'additional': '--acc 30 --iterations 1000 --spinpol --tblite',
+    'additional': '--gfnff --acc 50 --iterations 1000 --spinpol --tblite',
     'wfu': False
     }
 
@@ -687,10 +688,10 @@ if __name__ == '__main__':
     'qchem': 'Orca',
     'path': '/home/peter/orca_6_0_0/orca',
     'nproc': 4,
-    'functional': 'PBE',
-    'basis': 'pc-0',
+    'functional': 'HF-3c',
+    'basis': '',
     'charge': 0,
-    'multiplicity': 1,
+    'multiplicity': 2,
     'additional': '',
     'wfu': False
     }
@@ -740,7 +741,7 @@ if __name__ == '__main__':
 
     fname_zzallyl = "ZZAllyl"
     traj_file_diene = "traj_" + fname_zzallyl + ".xyz"
-    zzallyl  = Fragment.Polyatom_Init(fname=fname_zzallyl, qchem=qcinput, xyz=xyz_zzallyl, random_rot=True)
+    zzallyl  = Fragment.Polyatom_Init(fname=fname_zzallyl, qchem=qcinput_Orca, xyz=xyz_zzallyl, random_rot=True)
     zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
 
     clorine = Fragment.Atom_Init(atoms=['Cl'])
@@ -763,9 +764,9 @@ if __name__ == '__main__':
     print()
 
 
-    reaction =  Collision(zzallyl, oxygen, qchem=qcinput) 
+    reaction =  Collision(zzallyl, oxygen, qchem=qcinput_Orca) 
     #reaction.Specify_Collision_Sampling(Rini=7.0, bmax=4.0, bsampling=True, Ecoll=None, Ecoll_thermal=True, temp=300.0)
-    reaction.Specify_Collision_Sampling(Rini=5.0, bmax=5.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
+    reaction.Specify_Collision_Sampling(Rini=7.0, bmax=5.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
 
 
     backfile = "reaction_backup.xyz"
