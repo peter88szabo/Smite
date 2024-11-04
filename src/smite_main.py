@@ -94,7 +94,7 @@ class Molecule:
     def verlet_single_step(self, dt):
         self.q, self.p = velverlet(self.qchem, dt, self.wmass, self.q, self.p, self.atoms)
 
-    def run_trajectory(self, integrator='verlet', dt=42.0, startstep=0, maxstep=100, iprint=2, traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False, ):
+    def run_trajectory(self, integrator='verlet', timestep=1.0, startstep=0, maxstep=100, iprint=2, traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False, ):
         file_wf = "wavevfuntion" #or it should be given as class variable from self.fname
 
         #--------------------------------------------------------------------------------------
@@ -114,6 +114,8 @@ class Molecule:
         c6   = 41.341105             # [fs]       * c6 = [time in au]
         c7   = 2625.5                # [Hartree]  * c7 = [kJ/mol]
 
+        dt = timestep * c6
+
         with open(traj_file, "a") as file_trj:
             for istep in range(startstep, maxstep):
 
@@ -123,7 +125,7 @@ class Molecule:
                     act_temp = self.traj_temperature()
 
                     dE = E - E0
-                    print(f"step: {istep:<10d} time[fs]: {istep*dt/c6:<12.2f}  V[au]: {V:<13.5f} E[au]: {E:<13.5f} dE[cm-1]: {dE*c5:<12.3f} Temp[K]: {act_temp:<10.2f}")
+                    print(f"step: {istep:<10d} time[fs]: {istep*dt/c6:<12.2f}  V[au]: {V:<13.5f} E[au]: {E:<13.5f} dE[cm-1]: {dE*c5:<17.3f} Temp[K]: {act_temp:<10.2f}")
 
                     print_trajectory(file_trj, self.atoms, self.q, self.p, V, dE, dt, istep)
                     #--------------------------------------------------------------------------
@@ -145,7 +147,7 @@ class Molecule:
                     break
 
 
-    def restart_init(self, integrator='verlet', dt=42.0, startstep=0, maxstep=100, iprint=2, traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False):
+    def restart_init(self, integrator='verlet', timestep=1.0, startstep=0, maxstep=100, iprint=2, traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False):
         if restart:
             try:
                 last_step, self.atoms, self.q, self.p = parseCheckPoint(backfile)
@@ -155,28 +157,6 @@ class Molecule:
                 raise ValueError("!!!!!!!!!!!!!!! Backup file does not exist !!!!!!!!!!!!!!!!!!!")
         else:
             raise ValueError("Wrong sampling option in sample_and_run_trajectory() function")
-
-
-    def sample_and_run_trajectory(self, integrator='verlet', dt=42.0, startstep=0, maxstep=100, iprint=2,
-                                  traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False):
-        #---------------------------------------------
-        # Sample the internal motions of a fragment:
-        #---------------------------------------------
-        if self.natom == 1 and not restart:
-            self.Atom_Sampling()
-        elif self.natom == 2 and not restart:
-            self.Diatom_Sampling()
-        elif self.natom > 2 and not restart:
-            self.Polyatom_Sampling()
-        elif restart:
-            startstep = self.last_step
-        else:
-            raise ValueError("Wrong sampling option in sample_and_run_trajectory() function")
-        #---------------------------------------------
-
-        self.run_trajectory(integrator=integrator, dt=dt, startstep=startstep, maxstep=maxstep,
-                            iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=restart) 
-
 
     def traj_temperature(self):
         '''
@@ -265,27 +245,21 @@ class Fragment(Molecule):
         return cls(atoms=atoms, mass=mass, q_ini=q_ini, p_ini=p_ini)
 
     @classmethod
-    def Diatom_Init(cls, atoms, **kwargs):
+    def Diatom_Init(cls, fname, atoms, req=None, omega=None, alpha=None, De=None, rigid=False, random_rot=True, diatom='harmonic', nfix=0):
         if len(atoms) != 2:
             raise ValueError("ERROR: Diatom_Init accept only a diatomic molecule.")
 
-        req = kwargs.get('req', None)
-        omega = kwargs.get('omega', None)
-        alpha = kwargs.get('alpha', None)
-        De = kwargs.get('De', None)
-        random_rot = kwargs.get('random_rot', True)
-        rigid = kwargs.get('rigid', False)
-        diatom = kwargs.get('diatom', None)
+        req = req/0.52917721092 #Angstrom to Bohr
   
-        if req is None and rigid: 
-            raise ValueError("ERROR: For rigid diatom req must be given in Diatom_Init()")
+        if req is None: 
+            raise ValueError("ERROR: req must be given in Diatom_Init()")
         elif (req is None and omega is None) and not rigid and diatom == 'harmonic': 
             raise ValueError("ERROR: For non-rigid harmonic diatom req and omega must be given in Diatom_Init()")
         elif (req is None and alpha is None and De is None) and not rigid and diatom == 'morse': 
             raise ValueError("ERROR: For non-rigid Morse diatom req, alpha, De must be given in Diatom_Init()")
-        elif not rigid and diatom == None: 
-            raise ValueError("ERROR: non-rigid diatom must be specified: diatom = 'harmonic or 'morse'')")
 
+        if rigid:
+            nfix = 1
 
         c9=1.0e8/0.5291772e0
         c10=137.035999074
@@ -304,8 +278,9 @@ class Fragment(Molecule):
 
         this = cls(atoms=atoms, mass=mass, q_ini=q_ini, p_ini=p_ini)
 
+        this.fname      = fname
         this.req_diat = req
-        this.omega_diat = omega*c10/c9*(math.pi * 2)
+        this.omega_diat = omega*c10/c9*(math.pi * 2) #from cm-1 to atomic unit
         this.alpha_diat = alpha
         this.De_diat = De
         this.freq = [this.omega_diat]
@@ -316,17 +291,12 @@ class Fragment(Molecule):
         this.jvib = 0
         this.vibsampling = None
         this.rotsampling = None
+        this.nfix = nfix
 
         return this 
 
     @classmethod
-    def Polyatom_Init(cls, fname, qchem, xyz, **kwargs):
-        linear = kwargs.get('linear', False)
-        Amp_modeanim = kwargs.get('Amp_modeanim', 30.0)
-        is_eckart = kwargs.get('is_eckart', True)
-        random_rot = kwargs.get('random_rot', True)
-        rigid = kwargs.get('rigid', False)
-
+    def Polyatom_Init(cls, fname, qchem, xyz, nfix=0, linear=False, is_eckart=True, random_rot=True, rigid=False, Amp_modeanim=30.0):
 
         natom, atoms, q_eq = parseXYZ(xyz)
         q_eq = np.array(q_eq) / 0.52917721092  #Angstrom to Bohr
@@ -334,6 +304,11 @@ class Fragment(Molecule):
 
         if len(atoms) <= 2:
             raise ValueError("ERROR: PolyatomInit requires more than two atoms.")
+
+        nfix = 0
+        if rigid:
+            nfix = 3 * natom - 6 + linear
+
 
         mass = get_mass_vector(atoms)
 
@@ -360,6 +335,7 @@ class Fragment(Molecule):
         this.linear     = linear
         this.rigid      = rigid
         this.random_rot = random_rot
+        this.nfix       = nfix
 
         return this
 
@@ -381,11 +357,11 @@ class Fragment(Molecule):
         redmass = self.mass[0]*self.mass[1] / (self.mass[0] + self.mass[1])
 
         if self.rigid == False:
-            self.q, self.p = diatom_vibration_harmonic_sampling(self.vib_modes, self.req_diat, self.omega_diat, self.mass) 
+            self.q, self.p = diatom_vibration_harmonic_sampling(vib_modes=self.vibsampling, req=self.req_diat, omega=self.omega_diat, mass=self.mass) 
 
         self.q, self.p = cenmass(self.q, self.p, self.mass)
 
-        self.p, angmom, inertia = diatom_rotation_rigidrot_sampling(self.rot_modes, self.mass, self.q, self.p)
+        self.p, angmom, inertia = diatom_rotation_rigidrot_sampling(rot_modes=self.rotsampling, mass=self.mass, q=self.q, p=self.p)
 
         self.inertia  = inertia
         self.angmom   = angmom
@@ -421,6 +397,26 @@ class Fragment(Molecule):
 
         self.rotsampling = initialize_rotational_modes(init_rot_type=init_rot_type, temp=temp, jrot=jrot)
         return
+
+
+    def sample_and_run_trajectory(self, integrator='verlet', timestep=1.0, startstep=0, maxstep=100, iprint=1,
+                                  traj_file='trajectory.xyz', backfile="checkpoint.xyz"):
+        #---------------------------------------------
+        # Sample the internal motions of a fragment:
+        #---------------------------------------------
+        if self.natom == 1:
+            self.Atom_Sampling()
+        elif self.natom == 2:
+            self.Diatom_Sampling()
+        elif self.natom > 2:
+            self.Polyatom_Sampling()
+        else:
+            raise ValueError("Wrong sampling option in sample_and_run_trajectory() function")
+        #---------------------------------------------
+
+        self.run_trajectory(integrator=integrator, timestep=timestep, startstep=startstep, maxstep=maxstep,
+                            iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=False)
+
 
     def print_mode_sampling(self):
         print(f"\n{self.fname}")
@@ -502,10 +498,18 @@ class Collision(Molecule):
         if Rini == None or bmax == None or (Ecoll == None and Ecoll_thermal==False) or (Ecoll_thermal==True and temp==None):
             raise ValueError("Rini, bmax and Ecoll (or Ecoll_thermal) must be give in the input of Specify_Collision_Sampling()")
 
+        if Rini != None:
+            Rini = Rini/0.52917721092 #from Angstrom to Bohr
+        if bmax != None:
+            bmax = bmax/0.52917721092
+        if Ecoll != None:
+            Ecoll = Ecoll/2625.5 #from kJ/mol to Hartree
+        
+
         self.Rini = Rini
         self.bmax = bmax
-        self.bsampling = bsampling
         self.Ecoll = Ecoll
+        self.bsampling = bsampling
         self.Ecoll_thermal = Ecoll_thermal
         self.tempcoll = temp
         self.sampling_set = True
@@ -525,7 +529,7 @@ class Collision(Molecule):
             Rgas = (8.3144598/1000.0/2625.5) #in Hartree/K
             RT = Rgas * self.tempcoll
             self.Ecoll = thermal_collision_energy(RT) 
-            print("temp, Ecoll: ", self.tempcoll, self.Ecoll)
+            print("temp[K], Ecoll[kJ/mol]: ", self.tempcoll, self.Ecoll*2625.5)
 
         if self.Ecoll == None or self.bmax == None or self.Rini == None:
             raise ValueError("Ecoll (unless it's thermall sampled), bmax and Rini must be given in the input of Set_Relative_Init_Coords()")
@@ -595,12 +599,12 @@ class Collision(Molecule):
 
         return
 
-    def sample_and_run_collision(self, integrator='verlet', dt=42.0, startstep=0, maxstep=100, iprint=2,
+    def sample_and_run_collision(self, integrator='verlet', timestep=1.0, startstep=0, maxstep=100, iprint=2,
                                       traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False, **kwargs):
 
         self.Sample_Bimolecular_Reactants(**kwargs)
 
-        self.run_trajectory(integrator=integrator, dt=dt, startstep=startstep, maxstep=maxstep,
+        self.run_trajectory(integrator=integrator, timestep=timestep, startstep=startstep, maxstep=maxstep,
                             iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=restart)
 
 
@@ -642,7 +646,29 @@ if __name__ == '__main__':
       H      -1.462101      0.924083     -1.042665
      '''
 
-    seed = 320422
+     #ZZAllyl-peroxy+O2_Case1 M062X avtz optim Con 21 (11 csak a futtatos jelolesben 21)
+    xyz_zzallyl = '''
+    C   -0.19595538763398      0.07192231509414      0.00714857985445
+    C   -0.01703579534250     -0.10344222305327      1.49976587011423
+    C   -1.00831293517504     -0.74304790940588      2.21484017141187
+    C   -1.09565313995228     -0.96572164058650      3.69139746432409
+    O   -2.44905662107855     -1.09778426038872      4.10589699809888
+    O   -3.03738052053937      0.19479040763344      4.06761535894273
+    C   1.14919758827461      0.41511797958774      2.03274034295381
+    O   1.44878216770210      0.30476609400103      3.35160340084751
+    H   -1.82826168270363     -1.17741133496109      1.65145938615843
+    H   1.87669555170293      0.91631236085033      1.40830140902315
+    H   0.76154446389898      0.10310849679981     -0.51109606581980
+    H   -0.77393280198763     -0.75201110449544     -0.40695658995199
+    H   -0.72775230388759      0.99760660592287     -0.21471742835545
+    H   -0.61505142152353     -0.17733195303782      4.26524823267036
+    H   -0.65062609284075     -1.92286967316247      3.98246076165767
+    H   2.29766286152308      0.71228566068994      3.53361144883480
+    H   -3.35772393043684      0.25312017851188      3.15850065923520
+     '''
+
+
+    seed = 220422
     random.seed(seed)
 
     qcinput = {
@@ -652,8 +678,8 @@ if __name__ == '__main__':
     'functional': '',
     'basis': '',
     'charge': 0,
-    'multiplicity': 1,
-    'additional': '--acc 10',
+    'multiplicity': 2,
+    'additional': '--acc 30 --iterations 1000 --spinpol --tblite',
     'wfu': False
     }
 
@@ -693,8 +719,8 @@ if __name__ == '__main__':
     traj_file_diene = "traj_" + fname_diene + ".xyz"
 
 
-    fix_quantum = [(34, 0),
-                   (35, 0)]
+    fix_quantum = [(14, 1),
+                   (15, 2)]
 
     fix_energy  = [(0, 0.0),
                    (1, 0.0),
@@ -708,121 +734,45 @@ if __name__ == '__main__':
     #water  = Fragment.Polyatom_Init(fname=fname_water, qchem=qcinput, xyz=xyz_water, random_rot=random_rot)
     #water.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum_water)
 
-    diene  = Fragment.Polyatom_Init(fname=fname_diene, qchem=qcinput, xyz=xyz_diene, random_rot=True)
+    #diene  = Fragment.Polyatom_Init(fname=fname_diene, qchem=qcinput, xyz=xyz_diene, random_rot=True)
     #diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum, fix_temp=fix_temp)
-    diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
+    #diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
 
-    '''
-    print("----------------------------------------")
-    print()
-    print("water atoms: ", water.atoms)
-    print("water mass:  ", water.mass)
-    print("water q:     ", water.q)
-    print("water p:     ", water.q)
-    print()
-    water.print_mode_sampling()
-
-    if os.path.exists(traj_file_water):
-        os.remove(traj_file_water)
-        print(f"\n{traj_file_water} already exists, it has been deleted to create a new one.\n")
-
-    with open(traj_file_water, "a") as file_trj:
-        for igeom in range(ngeom):
-            water.Polyatom_Sampling() #in kwargs can be given random_rot=False, rigid=True...
-            water.print_structure(file_trj, igeom) 
-    print("Water done")
-
-   # if os.path.exists(traj_file_diene):
-   #     os.remove(traj_file_diene)
-   #     print(f"\n{traj_file_diene} already exists, it has been deleted to create a new one.\n")
-
-    if os.path.exists(traj_file_diene):
-        os.remove(traj_file_diene)
-        print(f"\n{traj_file_diene} already exists, it has been deleted to create a new one.\n")
-   
-    '''
-
-    print()
-    print("--------- Diene--------------------------------")
-    diene.print_mode_sampling()
-    #with open(traj_file_diene, "a") as file_trj:
-    #    for igeom in range(ngeom):
-    #        diene.Polyatom_Sampling() #in kwargs can be given random_rot=False, rigid=True...
-    #        diene.print_structure(file_trj, igeom)
-
-
-    nstep = 2000 
-    dt = 0.5*c6
-    #diene.Polyatom_Sampling() #in kwargs can be given random_rot=False, rigid=True...
-    '''
-    with open(traj_file_diene, "a") as file_trj:
-        for istep in range(nstep):
-            print(f"trajectory step: {istep}")
-            diene.verlet_single_step(dt)
-            diene.print_structure(file_trj, istep)
-    '''
-
-    integrator = 'verlet'
-    maxstep = 100 
-    iprint = 2
-    restart = False
-    backfile = "diene_backup.xyz"
-    startstep = 0
-    #diene.sample_and_run_trajectory(integrator=integrator, dt=dt, maxstep=maxstep, iprint=iprint, traj_file=traj_file_diene, backfile=backfile, restart=restart)
-
-    print("Diene done")
-
+    fname_zzallyl = "ZZAllyl"
+    traj_file_diene = "traj_" + fname_zzallyl + ".xyz"
+    zzallyl  = Fragment.Polyatom_Init(fname=fname_zzallyl, qchem=qcinput, xyz=xyz_zzallyl, random_rot=True)
+    zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
 
     clorine = Fragment.Atom_Init(atoms=['Cl'])
     fname_atom = 'Cl'
 
-    print("\nCl atom:")
-    print("atoms: ",  clorine.atoms)
-    print("mass:  ",  clorine.mass)
-    print("q:     ",  clorine.q)
-    print("p:     ",  clorine.p)
+
+    req_O2 = 1.2
+    omega_O2 = 1580.0
+    fname_oxygen = 'O2'
+
+    oxygen = Fragment.Diatom_Init(fname=fname_oxygen, atoms=['O','O'], req=req_O2, omega=omega_O2, random_rot=True, diatom='harmonic')
+    oxygen.Specify_Mode_Sampling(init_rot_type='Jfix', nvib=0, jrot=0)
+
+    print("--------- ZZ-OH-Allyl Isoprenyl radical--------")
+    zzallyl.print_mode_sampling()
+    print("--------- ZZ-OH-Allyl Isoprenyl radical DONE--------")
+
+
+    print("\nReaction of ZZ-OH-allyl + O2")
     print()
 
-    print("\nReaction of Diene + Cl")
-    print()
 
-    qcinput = {
-    'qchem': 'XTB',
-    'path': '/home/peter/orca_6_0_0/xtb',
-    'nproc': 8,
-    'functional': '',
-    'basis': '',
-    'charge': 0,
-    'multiplicity': 2,
-    'additional': '--acc 10',
-    'wfu': False
-    }
+    reaction =  Collision(zzallyl, oxygen, qchem=qcinput) 
+    #reaction.Specify_Collision_Sampling(Rini=7.0, bmax=4.0, bsampling=True, Ecoll=None, Ecoll_thermal=True, temp=300.0)
+    reaction.Specify_Collision_Sampling(Rini=5.0, bmax=5.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
 
 
-    reaction =  Collision(diene, clorine, qchem=qcinput) 
-    reaction.Specify_Collision_Sampling(Rini=12.0, bmax=6.0, bsampling=True, Ecoll=None, Ecoll_thermal=True, temp=300.0)
-
-    print("\nDiene + Cl reaction:")
-    print("atoms: ",  reaction.atoms)
-    print("mass: ",  reaction.atoms)
-    print("p: ",  reaction.p)
-    print("q: ",  reaction.q)
-
-
-    reaction.Sample_Bimolecular_Reactants()
-
-    print("\nAfter sampling Diene + Cl reaction:")
-    print("p: ",  reaction.p)
-    print("q: ",  reaction.q)
-
-
-    dt = 0.8*c6
-    restart = False
     backfile = "reaction_backup.xyz"
-    traj_file_reaction = "traj_" + fname_diene + "+" + fname_atom + ".xyz"
+    traj_file_reaction = "traj_" + fname_zzallyl + "+" + fname_oxygen + ".xyz"
 
 
-    reaction.sample_and_run_collision(integrator='verlet', dt=dt, maxstep=3000, iprint=2, traj_file=traj_file_reaction, backfile=backfile)
+    reaction.sample_and_run_collision(integrator='verlet', timestep=0.5, maxstep=3000, iprint=2, traj_file=traj_file_reaction, backfile=backfile)
 
 
 
