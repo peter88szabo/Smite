@@ -33,7 +33,7 @@ def diatom_rotation_rigidrot_sampling(rot_modes, mass, q, p):
     elif sampling_mode == 'T':
         Rgas = (8.3144598/1000.0/2625.5) #in Hartree/K
         RT = Rgas * excitation #excitation is the temperature here
-        jrot = thermal_rot_quantum_spherical_top(RT,Inertia):
+        jrot = thermal_rot_quantum_spherical_top(RT,Inertia)
         angmomabs = math.sqrt(jrot * (jrot + 1))
     else:
         raise ValueError("sampling_mode must be 'Q' or 'T'")
@@ -67,7 +67,7 @@ def diatom_vibration_harmonic_sampling(vib_modes, req, omega, mass):
     sampling_mode = vib_modes[0][1] # it must be 'Q', 'E', 'T'
     excitation = vib_modes[0][2] #it's either the nvib quantum number, energy or temperature
 
-    if sampling_mode == 'Q'::
+    if sampling_mode == 'Q':
         energy = omega * (nvib + 0.5)
     elif sampling_mode == 'T':
         Rgas = (8.3144598/1000.0/2625.5) #in Hartree/K

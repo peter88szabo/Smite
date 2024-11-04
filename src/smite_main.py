@@ -15,9 +15,11 @@ from normalmode.eckart            import eckart_transform
 from normalmode.nmodeprint        import print_normalmode 
 from normalmode.normalmode        import print_frequencies 
 
+from sampling.polyvibration       import initialize_vibrational_modes
+from sampling.polyrotation        import initialize_rotational_modes
 from sampling.polyvibration       import polyatom_vibration_sampling
+from sampling.polyvibration       import specify_vib_modes 
 from sampling.polyrotation        import polyatom_rotation_sampling
-from sampling.init_vib_rot_modes  import init_vib_rot_modes
 from sampling.thermal             import thermal_collision_energy
 from sampling.diatom              import diatom_rotation_rigidrot_sampling
 from sampling.diatom              import diatom_vibration_harmonic_sampling 
@@ -390,19 +392,34 @@ class Fragment(Molecule):
 
         if self.random_rot == True:
             self.q, self.p = euler_rot(self.q, self.p)
-
         return
 
 
-
-
     def Specify_Mode_Sampling(self, init_vib_type='ZPE', init_rot_type='Jfix', **kwargs):
-        if len(self.atoms) = 2:
-            self.vibsampling, self.rotsampling = init_vib_rot_modes(freq=[self.omega_diat], init_vib_type=init_vib_type, init_rot_type=init_rot_type, **kwargs)
-        elif len(self.atoms) > 2:
-            self.vibsampling, self.rotsampling = init_vib_rot_modes(self.freq, init_vib_type=init_vib_type, init_rot_type=init_rot_type, **kwargs)
-        else
-            raise ValueError("Does not make sense to call this Specify_Mode_Sampling() function with a single atom!!!")
+        temp = kwargs.get('temp', None)
+        jrot = kwargs.get('jrot', None)
+        nvib = kwargs.get('nvib', None)
+        energy = kwargs.get('energy', None)
+
+        #Non-rigid Diatom case:
+        if not self.rigid and len(self.atoms) == 2:
+            if 'nvib' in kwargs:
+                self.vibsampling[0] = (self.omega_diat, 'Q', nvib) 
+            elif 'energy' in kwargs:
+                self.vibsampling[0] = (self.omega_diat, 'E', energy) 
+            elif 'temp' in kwargs:
+                self.vibsampling[0] = (self.omega_diat, 'T', temp) 
+
+        #Non-rigid Polyatom case:
+        elif not self.rigid and len(self.atoms) > 2:
+           #uniformly initialize all modes (w.r.t to ZPE or Temperature):
+            self.vibsampling = initialize_vibrational_modes(freq=self.freq, init_vib_type=init_vib_type, temp=temp)
+
+           #if necessary then we may change certain modes sampling
+            if {'fix_quantum', 'fix_energy', 'fix_temp'}.intersection(kwargs):
+                self.vibsampling = specify_vib_modes(vib_modes=self.vibsampling, **kwargs)
+
+        self.rotsampling = initialize_rotational_modes(init_rot_type=init_rot_type, temp=temp, jrot=jrot)
         return
 
     def print_mode_sampling(self):
