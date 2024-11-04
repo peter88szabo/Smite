@@ -44,19 +44,19 @@ def diatom_rotation_rigidrot_sampling(rot_modes, mass, q, p):
     angle = random.uniform(0, 2 * math.pi)
     angmom = [
         0.0,
-        agnmomabs * math.sin(angle),
-        agnmomabs * math.cos(angle)
+        angmomabs * math.sin(angle),
+        angmomabs * math.cos(angle)
     ]
 
     wx = 0.0
     wy = -angmom[1] / ai[1]
     wz = -angmom[2] / ai[2]
 
-    angvel = [wx, wy, wz]
+    angvel = np.array([wx, wy, wz])
 
     p = add_rotational_momentum(angvel, mass, q, p)
 
-    return (p, am, Inertia) #it does not change the positions only the momentum
+    return (p, angmom, Inertia) #it does not change the positions only the momentum
 
 
 def diatom_vibration_harmonic_sampling(vib_modes, req, omega, mass):

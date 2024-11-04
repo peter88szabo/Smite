@@ -69,12 +69,14 @@ def call_XTB(q, atoms, path, charge, multiplicity, method, arg, additional, nato
 
     if multiplicity == 1:
         command = [path, inputfile, "-c", str(charge), arg, additional]
-        command_restart = [path, inputfile, "-c", str(charge), arg, additional, "--gfnff"] 
+        command_restart = [path, inputfile, "-c", str(charge), arg, additional, "--etemp 1000.0", "--gfnff", "--acc 200"] 
+        ##command_restart = [path, inputfile, "-c", str(charge), arg, additional, "--etemp 1000.0", "--acc 200"] 
         #command_restart = [path, inputfile, "-c", str(charge), arg, additional, "--etemp 1000.0", "&&",  
         #                   path, inputfile, "-c", str(charge), arg, additional, "--restart"]
     else:
         command = [path, inputfile, "-c", str(charge), "-u", str(multiplicity-1), arg, additional]
-        command_restart = [path, inputfile, "-c", str(charge), "-u", str(multiplicity-1), arg, additional, "--gfnff"]
+        command_restart = [path, inputfile, "-c", str(charge), "-u", str(multiplicity-1), arg, additional, "--etemp 1000.0", "--gfnff", "--acc 200"]
+        ###command_restart = [path, inputfile, "-c", str(charge), "-u", str(multiplicity-1), arg, additional, "--etemp 1000.0", "--acc 200"]
         #command_restart = [path, inputfile, "-c", str(charge), "-u", str(multiplicity-1), arg, additional, "--etemp 1000.0", "&&",
         #                   path, inputfile, "-c", str(charge), "-u", str(multiplicity-1), arg, additional, "--restart"]
 
