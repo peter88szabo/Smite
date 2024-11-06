@@ -9,7 +9,7 @@ from utils.format_and_print       import parseXYZ
 from utils.format_and_print       import print_trajectory
 from utils.atomic_overlap         import check_atomic_overlap
 from utils.atomic_masses          import get_mass_vector 
-from utils.distance               import test_to_stop
+from utils.clustering             import cluster_chemical_formulas
 
 from normalmode.hessian           import getHessian
 from normalmode.eckart            import eckart_transform
@@ -56,16 +56,17 @@ class Molecule:
         self.totmass    = np.sum(mass) 
         self.qchem      = None 
         self.last_step  = last_step
+        self.Rstop      = None 
 
 
-    def center_of_mass(self):
+    def center_of_mass(self, q, mass):
         """
         Calculate the center of mass of the fragment
         this is different then cenmass() from utils
         cenmass() shift the fragmentnt into the COM
         """
-        xyz = np.reshape(self.q, (-1, 3))
-        return np.average(xyz, axis=0, weights=self.w)
+        xyz = np.reshape(q, (-1, 3))
+        return np.average(xyz, axis=0, weights=mass)
 
     def rotate_random(self):
         """
@@ -97,8 +98,13 @@ class Molecule:
     def verlet_single_step(self, dt):
         self.q, self.p = velverlet(self.qchem, dt, self.wmass, self.q, self.p, self.atoms)
 
-    def run_trajectory(self, integrator='verlet', timestep=1.0, startstep=0, maxstep=100, iprint=2, traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False, collision=False):
+    def run_trajectory(self, integrator='verlet', timestep=1.0, startstep=0, maxstep=100,
+                       iprint=2, traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False, collision=False, Rstop=10.0):
         file_wf = "wavevfuntion" #or it should be given as class variable from self.fname
+
+        b2a = 0.52917721092
+        
+        self.Rstop = Rstop/b2a #Angstrom to Bohr #reactive event condition for trajectory 
 
         #--------------------------------------------------------------------------------------
         if not restart:
@@ -118,39 +124,64 @@ class Molecule:
         c7   = 2625.5                # [Hartree]  * c7 = [kJ/mol]
 
         dt = timestep * c6
+        tstop = False
+        Rcom_min = 1000000.0
 
         with open(traj_file, "a") as file_trj:
             for istep in range(startstep, maxstep):
 
+                #-----------------------------------------------------------------------------
                 if (iprint > 0 and istep % iprint == 0 and istep > startstep) or istep == 0:
                     T, V, E = self.get_energy() 
 
                     act_temp = self.traj_temperature()
 
                     dE = E - E0
-                    print(f"step: {istep:<10d} time[fs]: {istep*dt/c6:<12.2f}  V[au]: {V:<13.5f} E[au]: {E:<13.5f} dE[cm-1]: {dE*c5:<17.3f} Temp[K]: {act_temp:<10.2f}")
+
 
                     print_trajectory(file_trj, self.atoms, self.q, self.p, V, dE, dt, istep)
-                    #--------------------------------------------------------------------------
-                    #Backup:
-                    backup_file=open(backfile,'w')
-                    print_trajectory(backup_file, self.atoms, self.q, self.p, V, dE, dt, istep)
-                    backup_file.close()
-                    #--------------------------------------------------------------------------
+
+
+
+                    if collision:
+                        Rcom_actual = self.reactants_cenmass_distance()
+
+                        print(f"step: {istep:<10d} t[fs]: {istep*dt/c6:<12.2f}  V[Eh]: {V:<15.5f} E[Eh]: {E:<15.5f} dE[cm-1]: {dE*c5:17.3f} T[K]: {act_temp:<10.2f} Rcom[A]: {Rcom_actual*b2a:8.2f}")
+
+                        if Rcom_actual < Rcom_min:
+                            Rcom_min = Rcom_actual
+
+                        if Rcom_actual < 0.8*self.Rini: #preventing the intiail detection of the two reactants as reactive event
+                            tstop = self.test_to_stop(tol=self.Rstop)
+                    else: #if not collision (just unimolecular dynamics) then we can ran the test anytime
+                        print(f"step: {step:<10d} t[fs]: {istep*dt/c6:<12.2f}  V[Eh]: {V:<15.5f} E[Eh]: {E:<15.5f} dE[cm-1]: {dE*c5:<17.3f} T[K]: {act_temp:<10.2f}")
+                        tstop = self.test_to_stop(tol=self.Rstop)
+
+
+                    if tstop:
+                        #minPts: minum number of points to be a cluster
+                        #eps: in Angstrom the tolerance within can be considered something as cluster
+
+                        formula = cluster_chemical_formulas(self.q, self.atoms, eps=2.1, minPts=2)
+
+                        print("\n Reactive event found: ", formula)
+                        break
+                #-----------------------------------------------------------------------------
 
                 if integrator == 'verlet':
                     self.verlet_single_step(dt)
                 else:
                     raise ValueError("Only Verlet integrator is avaiable at the moment")
 
+                #--------------------------------------------------------------------------
+                #Backup:
+                backup_file=open(backfile,'w')
+                print_trajectory(backup_file, self.atoms, self.q, self.p, V, dE, dt, istep)
+                backup_file.close()
+                #--------------------------------------------------------------------------
 
-                if not collision: #for unimolecular dynamics we always test 
-                    tstop = test_to_stop(q, tol=self.Rstop)
-                else: #for bimolecular we cannot call test in the beginning because of the initial separation
-
-                if tstop == True:
-                    print("\n Reactive event found")
-                    break
+                if istep == (maxstep-1):
+                    print("\n Propgation time has reached the maximum number of steps")
 
 
     def restart_init(self, integrator='verlet', timestep=1.0, startstep=0, maxstep=100, iprint=2, traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False):
@@ -181,6 +212,17 @@ class Molecule:
         Ekin=sum(self.p*self.p/self.wmass)*0.5
 
         return 2.0*Ekin/float(len(self.p)-self.nfix)/Rgas
+
+    def test_to_stop(self, tol=16.0):
+        coord = np.reshape(self.q, (-1, 3))
+
+        #distance matrix:
+        dist_mat = np.sqrt(np.sum((coord[:, np.newaxis, :] - coord[np.newaxis, :, :]) ** 2, axis=-1))
+
+        too_large = np.any(dist_mat[np.tril_indices(dist_mat.shape[0], -1)] > tol)
+
+        return too_large
+
 
 
     def merge_with(self, other_molecule):
@@ -420,7 +462,7 @@ class Fragment(Molecule):
 
 
     def sample_and_run_trajectory(self, integrator='verlet', timestep=1.0, startstep=0, maxstep=100, iprint=1,
-                                  traj_file='trajectory.xyz', backfile="checkpoint.xyz"):
+                                  traj_file='trajectory.xyz', backfile="checkpoint.xyz", Rstop=10.0):
         #---------------------------------------------
         # Sample the internal motions of a fragment:
         #---------------------------------------------
@@ -435,7 +477,7 @@ class Fragment(Molecule):
         #---------------------------------------------
 
         self.run_trajectory(integrator=integrator, timestep=timestep, startstep=startstep, maxstep=maxstep,
-                            iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=False)
+                            iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=False, Rstop=Rstop)
 
 
     def print_mode_sampling(self):
@@ -512,6 +554,7 @@ class Collision(Molecule):
         self.fragment_A = fragment_A
         self.fragment_B = fragment_B
         self.sampling_set = False
+        self.Rcom = None
 
     def Specify_Collision_Sampling(self, Rini=None, bmax=None, bsampling=False, Ecoll=None, Ecoll_thermal=False, temp=None):
 
@@ -595,26 +638,22 @@ class Collision(Molecule):
         return 
 
 
-    def faragments_actual_coordinate(self)
-
+    def reactants_actual_coordinate(self):
         natom_A = self.fragment_A.natom
         natom_B = self.fragment_B.natom
 
-        comA = self.fragment_A.center_of_mass()
-        comB = self.fragment_B.center_of_mass()
+        qA = self.q[:3*natom_A]
+        qB = self.q[3*natom_A:]
 
-        com_dist = np.linalg.norm(np.array(com1) - np.array(com2))
-        return com_dist
+        return (qA, qB)
 
-    def faragment_com_distance(self)
+    def reactants_cenmass_distance(self):
+        qA, qB = self.reactants_actual_coordinate()
 
-        natom_A = self.fragment_A.natom
-        natom_B = self.fragment_B.natom
+        comA = self.center_of_mass(qA, self.fragment_A.mass)
+        comB = self.center_of_mass(qB, self.fragment_B.mass)
 
-        comA = self.fragment_A.center_of_mass()
-        comB = self.fragment_B.center_of_mass()
-
-        com_dist = np.linalg.norm(np.array(com1) - np.array(com2))
+        com_dist = np.linalg.norm(np.array(comA) - np.array(comB))
         return com_dist
 
 
@@ -644,12 +683,12 @@ class Collision(Molecule):
         return
 
     def sample_and_run_collision(self, integrator='verlet', timestep=1.0, startstep=0, maxstep=100, iprint=2,
-                                      traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False, **kwargs):
+                                      traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False, Rstop=10.0, **kwargs):
 
         self.Sample_Bimolecular_Reactants(**kwargs)
 
         self.run_trajectory(integrator=integrator, timestep=timestep, startstep=startstep, maxstep=maxstep,
-                            iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=restart, collision=True)
+                            iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=restart, collision=True, Rstop=Rstop)
 
 
         
@@ -809,14 +848,14 @@ if __name__ == '__main__':
 
     reaction =  Collision(zzallyl, oxygen, qchem=qcinput) 
     #reaction.Specify_Collision_Sampling(Rini=7.0, bmax=4.0, bsampling=True, Ecoll=None, Ecoll_thermal=True, temp=300.0)
-    reaction.Specify_Collision_Sampling(Rini=5.0, bmax=5.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
+    reaction.Specify_Collision_Sampling(Rini=5.5, bmax=4.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
 
 
     backfile = "reaction_backup.xyz"
     traj_file_reaction = "traj_" + fname_zzallyl + "+" + fname_oxygen + ".xyz"
 
 
-    reaction.sample_and_run_collision(integrator='verlet', timestep=0.5, maxstep=2000, iprint=4, traj_file=traj_file_reaction, backfile=backfile)
+    reaction.sample_and_run_collision(integrator='verlet', timestep=0.5, maxstep=2000, iprint=4, Rstop=12.0, traj_file=traj_file_reaction, backfile=backfile)
 
 
 
