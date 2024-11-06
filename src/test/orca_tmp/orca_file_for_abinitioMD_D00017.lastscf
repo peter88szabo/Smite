@@ -1,0 +1,318 @@
+-------------------------------------------------------------------------------
+                                 ORCA GUESS
+                   Start orbitals & Density for SCF / CASSCF
+-------------------------------------------------------------------------------
+
+------------
+SCF SETTINGS
+------------
+Hamiltonian:
+ Ab initio Hamiltonian  Method          .... Hartree-Fock(GTOs)
+
+
+General Settings:
+ Integral files         IntName         .... orca_tmp/orca_file_for_abinitioMD_D00017
+ Hartree-Fock type      HFTyp           .... UHF
+ Total Charge           Charge          ....    0
+ Multiplicity           Mult            ....    2
+ Number of Electrons    NEL             ....   63
+ Basis Dimension        Dim             ....   49
+ Nuclear Repulsion      ENuc            ....    376.8968467038 Eh
+
+Convergence Acceleration:
+ AO-DIIS                CNVDIIS         .... on
+   Start iteration      DIISMaxIt       ....    12
+   Startup error        DIISStart       ....  0.200000
+   # of expansion vecs  DIISMaxEq       ....     5
+   Bias factor          DIISBfac        ....   1.050
+   Max. coefficient     DIISMaxC        ....  10.000
+ MO-DIIS                CNVKDIIS        .... off
+ Trust-Rad. Augm. Hess. CNVTRAH         .... auto
+   Auto Start mean grad. ratio tolernc. ....  1.125000
+   Auto Start start iteration           ....     1
+   Auto Start num. interpolation iter.  ....    10
+   Max. Number of Micro iterations      ....    24
+   Max. Number of Macro iterations      .... Maxiter - #DIIS iter
+   Number of Davidson start vectors     ....     2
+   Converg. threshold    (grad. norm)   ....   1.000e-05
+   Grad. Scal. Fac. for Micro threshold ....   0.100
+   Minimum threshold for Micro iter.    ....   1.000e-02
+   NR start threshold (gradient norm)   ....   1.000e-04
+   Initial trust radius                 ....   0.400
+   Minimum AH scaling param. (alpha)    ....   1.000
+   Maximum AH scaling param. (alpha)    .... 1000.000
+   Quad. conv. algorithm                .... NR
+   White noise on init. David. guess    .... on
+   Maximum white noise                  ....   0.010
+   Pseudo random numbers                .... off
+   Inactive MOs                         .... canonical
+   Orbital update algorithm             .... Taylor
+   Preconditioner                       .... Diag
+   Full preconditioner red. dimension   ....   250
+ SOSCF                  CNVSOSCF        .... on
+   Start iteration      SOSCFMaxIt      ....   150
+   Startup grad/error   SOSCFStart      ....  0.003300
+   Hessian update       SOSCFHessUp     .... L-BFGS
+ Level Shifting         CNVShift        .... on
+   Level shift para.    LevelShift      ....    0.2500
+   Turn off err/grad.   ShiftErr        ....    0.0010
+ Zerner damping         CNVZerner       .... off
+ Static damping         CNVDamp         .... on
+   Fraction old density DampFac         ....    0.7000
+   Max. Damping (<1)    DampMax         ....    0.9800
+   Min. Damping (>=0)   DampMin         ....    0.0000
+   Turn off err/grad.   DampErr         ....    0.1000
+
+SCF Procedure:
+ Maximum # iterations   MaxIter         ....   125
+ SCF integral mode      SCFMode         .... Conventional
+ Integral Threshold     Thresh          ....  2.500e-11 Eh
+ Primitive CutOff       TCut            ....  2.500e-12 Eh
+ Integral Buffer length BufferLength    .... 1048576
+ Integral index format  IndFormat       ....     0
+ Integral value format  ValFormat       ....     0
+ Integral Storage       Thresh          ....  2.500e-11 Eh
+
+Convergence Tolerance:
+ Convergence Check Mode ConvCheckMode   .... Total+1el-Energy
+ Convergence forced     ConvForced      .... 1
+ Energy Change          TolE            ....  1.000e-08 Eh
+ 1-El. energy change                    ....  1.000e-05 Eh
+ Orbital Gradient       TolG            ....  1.000e-05
+ Orbital Rotation angle TolX            ....  1.000e-05
+ DIIS Error             TolErr          ....  5.000e-07
+
+---------------------
+INITIAL GUESS: MOREAD
+---------------------
+Guess MOs are being read from file: orca_tmp/orca_file_for_abinitioMD.gbw1
+Input geometry compatible with but different from current geometry
+Input basis set matches current basis set (good)
+MOs were renormalized
+MOs were reorthogonalized (Cholesky)
+                      ------------------
+                      INITIAL GUESS DONE (   0.0 sec)
+                      ------------------
+             **** ENERGY FILE WAS UPDATED (orca_tmp/orca_file_for_abinitioMD_D00017.en.tmp) ****
+Finished Guess after   0.0 sec
+Maximum memory used throughout the entire GUESS-calculation: 3.2 MB
+Warning: Unable to find asked property in file 'orca_tmp/orca_file_for_abinitioMD_D00017.property.txt'
+
+-------------------------------------------------------------------------------------------
+                                      ORCA LEAN-SCF
+                              memory conserving SCF solver
+-------------------------------------------------------------------------------------------
+
+
+ InCore treatment chosen for four center integrals:
+   Memory dedicated               ...    1024 MB
+   Memory needed                  ...      6 MB
+   Number of tiny    integrals    ...   57071
+   Number of small   integrals    ...  129974
+   Number of regular integrals    ...  456197
+
+----------------------------------------D-I-I-S--------------------------------------------
+Iteration    Energy (Eh)           Delta-E    RMSDP     MaxDP     DIISErr   Damp  Time(sec)
+-------------------------------------------------------------------------------------------
+                              *** Initializing SOSCF ***
+---------------------------------------S-O-S-C-F--------------------------------------
+Iteration    Energy (Eh)           Delta-E    RMSDP     MaxDP     MaxGrad    Time(sec)
+--------------------------------------------------------------------------------------
+    1    -416.2101215499930049     0.00e+00  2.57e-05  2.31e-04  5.93e-05     0.0
+    2    -416.2101228686382228    -1.32e-06  1.42e-05  1.28e-04  1.34e-04     0.0
+    3    -416.2101231613634127    -2.93e-07  1.29e-05  1.62e-04  8.41e-05     0.0
+    4    -416.2101232551614203    -9.38e-08  4.23e-06  6.27e-05  2.78e-05     0.0
+    5    -416.2101232678077167    -1.26e-08  2.98e-06  4.39e-05  8.92e-06     0.0
+    6    -416.2101232718576966    -4.05e-09  4.87e-07  6.07e-06  2.15e-06     0.0
+                 **** Energy Check signals convergence ****
+
+               *****************************************************
+               *                     SUCCESS                       *
+               *           SCF CONVERGED AFTER   6 CYCLES          *
+               *****************************************************
+
+             **** ENERGY FILE WAS UPDATED (orca_tmp/orca_file_for_abinitioMD_D00017.en.tmp) ****
+
+----------------
+TOTAL SCF ENERGY
+----------------
+
+Total Energy       :       -416.21012327185770 Eh          -11325.65324 eV
+
+Components:
+Nuclear Repulsion  :        376.89684670375448 Eh           10255.88460 eV
+Electronic Energy  :       -793.10696997561217 Eh          -21581.53784 eV
+One Electron Energy:      -1317.90112529105136 Eh          -35861.91280 eV
+Two Electron Energy:        524.79415531543918 Eh           14280.37497 eV
+
+Virial components:
+Potential Energy   :       -832.53601224893862 Eh          -22654.45662 eV
+Kinetic Energy     :        416.32588897708092 Eh           11328.80338 eV
+Virial Ratio       :          1.99972193488734
+
+---------------
+SCF CONVERGENCE
+---------------
+
+  Last Energy change         ...    4.0500e-09  Tolerance :   1.0000e-08
+  Last MAX-Density change    ...    6.0722e-06  Tolerance :   1.0000e-07
+  Last RMS-Density change    ...    4.8722e-07  Tolerance :   5.0000e-09
+  Last DIIS Error            ...    1.7293e-04  Tolerance :   5.0000e-07
+  Last Orbital Gradient      ...    2.1516e-06  Tolerance :   1.0000e-05
+  Last Orbital Rotation      ...    3.2426e-06  Tolerance :   1.0000e-05
+
+
+----------------------
+UHF SPIN CONTAMINATION
+----------------------
+
+Expectation value of <S**2>     :     0.989390
+Ideal value S*(S+1) for S=0.5   :     0.750000
+Deviation                       :     0.239390
+
+----------------
+ORBITAL ENERGIES
+----------------
+                 SPIN UP ORBITALS
+  NO   OCC          E(Eh)            E(eV) 
+   0   1.0000     -20.378634      -554.5308 
+   1   1.0000     -20.374461      -554.4173 
+   2   1.0000     -20.362095      -554.0808 
+   3   1.0000     -11.228353      -305.5390 
+   4   1.0000     -11.227859      -305.5256 
+   5   1.0000     -11.175119      -304.0904 
+   6   1.0000     -11.165893      -303.8394 
+   7   1.0000     -11.164736      -303.8079 
+   8   1.0000      -1.460003       -39.7287 
+   9   1.0000      -1.396007       -37.9873 
+  10   1.0000      -1.195256       -32.5246 
+  11   1.0000      -1.107483       -30.1361 
+  12   1.0000      -0.994125       -27.0515 
+  13   1.0000      -0.938694       -25.5432 
+  14   1.0000      -0.857939       -23.3457 
+  15   1.0000      -0.747609       -20.3435 
+  16   1.0000      -0.713849       -19.4248 
+  17   1.0000      -0.680052       -18.5051 
+  18   1.0000      -0.654756       -17.8168 
+  19   1.0000      -0.636792       -17.3280 
+  20   1.0000      -0.613870       -16.7042 
+  21   1.0000      -0.598027       -16.2732 
+  22   1.0000      -0.571442       -15.5497 
+  23   1.0000      -0.563719       -15.3396 
+  24   1.0000      -0.546414       -14.8687 
+  25   1.0000      -0.529974       -14.4213 
+  26   1.0000      -0.499654       -13.5963 
+  27   1.0000      -0.492986       -13.4148 
+  28   1.0000      -0.434117       -11.8129 
+  29   1.0000      -0.423298       -11.5185 
+  30   1.0000      -0.413342       -11.2476 
+  31   1.0000      -0.313094        -8.5197 
+  32   0.0000       0.283599         7.7171 
+  33   0.0000       0.383726        10.4417 
+  34   0.0000       0.495250        13.4764 
+  35   0.0000       0.521974        14.2036 
+  36   0.0000       0.569464        15.4959 
+  37   0.0000       0.612102        16.6561 
+  38   0.0000       0.618936        16.8421 
+  39   0.0000       0.637867        17.3573 
+  40   0.0000       0.676313        18.4034 
+  41   0.0000       0.689292        18.7566 
+  42   0.0000       0.719568        19.5804 
+
+                 SPIN DOWN ORBITALS
+  NO   OCC          E(Eh)            E(eV) 
+   0   1.0000     -20.378217      -554.5195 
+   1   1.0000     -20.374214      -554.4105 
+   2   1.0000     -20.357982      -553.9689 
+   3   1.0000     -11.231222      -305.6171 
+   4   1.0000     -11.203344      -304.8585 
+   5   1.0000     -11.195520      -304.6456 
+   6   1.0000     -11.162526      -303.7478 
+   7   1.0000     -11.138804      -303.1023 
+   8   1.0000      -1.458821       -39.6965 
+   9   1.0000      -1.379190       -37.5297 
+  10   1.0000      -1.192907       -32.4607 
+  11   1.0000      -1.107611       -30.1396 
+  12   1.0000      -0.965844       -26.2820 
+  13   1.0000      -0.910450       -24.7746 
+  14   1.0000      -0.841405       -22.8958 
+  15   1.0000      -0.734626       -19.9902 
+  16   1.0000      -0.712671       -19.3928 
+  17   1.0000      -0.676081       -18.3971 
+  18   1.0000      -0.645164       -17.5558 
+  19   1.0000      -0.627784       -17.0829 
+  20   1.0000      -0.600742       -16.3470 
+  21   1.0000      -0.590285       -16.0625 
+  22   1.0000      -0.563474       -15.3329 
+  23   1.0000      -0.543173       -14.7805 
+  24   1.0000      -0.530788       -14.4435 
+  25   1.0000      -0.522471       -14.2172 
+  26   1.0000      -0.491064       -13.3625 
+  27   1.0000      -0.487376       -13.2622 
+  28   1.0000      -0.431813       -11.7502 
+  29   1.0000      -0.412241       -11.2176 
+  30   1.0000      -0.385350       -10.4859 
+  31   0.0000       0.177596         4.8326 
+  32   0.0000       0.338386         9.2079 
+  33   0.0000       0.385481        10.4895 
+  34   0.0000       0.501496        13.6464 
+  35   0.0000       0.534547        14.5458 
+  36   0.0000       0.579912        15.7802 
+  37   0.0000       0.617852        16.8126 
+  38   0.0000       0.644584        17.5400 
+  39   0.0000       0.652168        17.7464 
+  40   0.0000       0.684224        18.6187 
+  41   0.0000       0.693101        18.8602 
+*Only the first 10 virtual orbitals were printed.
+-------
+TIMINGS
+-------
+
+Total SCF time: 0 days 0 hours 0 min 0 sec 
+
+Total time                  ....       0.121 sec
+Sum of individual times     ....       0.115 sec  ( 95.0%)
+
+SCF preparation             ....       0.014 sec  ( 11.9%)
+Fock matrix formation       ....       0.095 sec  ( 78.1%)
+  Startup                   ....       0.001 sec  (  1.0% of F)
+  Coulomb+Exchange Fock     ....       0.092 sec  ( 96.9% of F)
+Diagonalization             ....       0.000 sec  (  0.0%)
+Density matrix formation    ....       0.002 sec  (  1.3%)
+Total Energy calculation    ....       0.000 sec  (  0.3%)
+Population analysis         ....       0.000 sec  (  0.0%)
+Orbital Transformation      ....       0.001 sec  (  0.5%)
+Orbital Orthonormalization  ....       0.000 sec  (  0.0%)
+DIIS solution               ....       0.001 sec  (  0.6%)
+SOSCF solution              ....       0.003 sec  (  2.3%)
+Finished LeanSCF after   0.1 sec
+
+Maximum memory used throughout the entire LEANSCF-calculation: 59.1 MB
+
+
+-------------------------------------------------------------------------------
+                          DFT DISPERSION CORRECTION                            
+                                                                               
+                              DFTD3 V3.1  Rev 1                                
+                          USING Becke-Johnson damping                          
+-------------------------------------------------------------------------------
+Hartree-Fock is recognized
+Active option DFTDOPT                   ...         4   
+
+molecular C6(AA) [au] = 2390.200455 
+
+
+            DFT-D V3
+ parameters
+ using HF/MINIX parameters
+ s6 scaling factor         :     1.0000 
+ a1 scaling factor         :     0.4171 
+ s8 scaling factor         :     0.8777 
+ a2 scaling factor         :     2.9149 
+ ad hoc parameters k1-k3   :    16.0000     1.3333    -4.0000 
+
+ Edisp/kcal,au: -39.985010617957  -0.063720163608 
+ E6   /kcal   : -22.623230648 
+ E8   /kcal   : -17.361779969 
+ % E8         :  43.420721168 
+

@@ -1,46 +1,16 @@
 import numpy as np
-import math
 
-def distances(q):
-    natoms = len(q) // 3
-    d = np.zeros((natoms,natoms))
-    for i in range(natoms):
-        for j in range(i):
-            tx = q[3*j]   - q[3*i]
-            ty = q[3*j+1] - q[3*i+1]
-            tz = q[3*j+2] - q[3*i+2]
+def distance_matrix(q):
+    N = len(q) // 3
+    coordinates = np.reshape(q, (N, 3))
+    dist_matrix = np.sqrt(np.sum((coordinates[:, np.newaxis, :] - coordinates[np.newaxis, :, :]) ** 2, axis=-1))
+    return dist_matrix
 
-            d[i][j] = math.sqrt(tx*tx + ty*ty + tz*tz)
-    return d
+def test_to_stop(q, tol=12.0):
 
-
-def test_to_stop(istep,  q, iatom, jatom, tol):
-    bohr_to_angst = 0.52917721092
-
+    dist = distance_matrix(q)
     
+    # Check if any distance in the lower triangle of the matrix exceeds the tolerance
+    too_large = np.any(dist[np.tril_indices(dist.shape[0], -1)] > tol)
 
-    dist = distances(q)
-
-    if iatom < jatom:
-        iatom,jatom = jatom,iatom
-    if iatom == jatom:
-        raise TypeError("two indices cannot be the same")
-
-    res = False
-
-    tol = tol/bohr_to_angst
-
-    if dist[iatom][jatom] > tol:
-        res = True
-
-#    for i in range(natoms):
-#        for j in range(i):
-#            print(i,j, dist[i][j]*bohr_to_angst)
-
-#    print()
-#    print(istep, "i,j: ", iatom, jatom)
-#    print("dist[bohr] = ", dist[iatom][jatom], ", dist[Angst] = ", dist[iatom][jatom]* bohr_to_angst, ", tol[Angst] = ", tol*bohr_to_angst)
-
-    return res
-
-
+    return too_large

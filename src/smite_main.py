@@ -60,10 +60,12 @@ class Molecule:
 
     def center_of_mass(self):
         """
-        Calculate the center of mass of the fragment and shift the molecule
-        to its center of mass.
+        Calculate the center of mass of the fragment
+        this is different then cenmass() from utils
+        cenmass() shift the fragmentnt into the COM
         """
-        self.q, self.p = cenmass(self.q, self.p, self.mass)
+        xyz = np.reshape(self.q, (-1, 3))
+        return np.average(xyz, axis=0, weights=self.w)
 
     def rotate_random(self):
         """
@@ -95,7 +97,7 @@ class Molecule:
     def verlet_single_step(self, dt):
         self.q, self.p = velverlet(self.qchem, dt, self.wmass, self.q, self.p, self.atoms)
 
-    def run_trajectory(self, integrator='verlet', timestep=1.0, startstep=0, maxstep=100, iprint=2, traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False, ):
+    def run_trajectory(self, integrator='verlet', timestep=1.0, startstep=0, maxstep=100, iprint=2, traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False, collision=False):
         file_wf = "wavevfuntion" #or it should be given as class variable from self.fname
 
         #--------------------------------------------------------------------------------------
@@ -141,7 +143,10 @@ class Molecule:
                 else:
                     raise ValueError("Only Verlet integrator is avaiable at the moment")
 
-                tstop = False#test_to_stop(i, q, stopcond['atomA'], stopcond['atomB'], stopcond['rdist'])
+
+                if not collision: #for unimolecular dynamics we always test 
+                    tstop = test_to_stop(q, tol=self.Rstop)
+                else: #for bimolecular we cannot call test in the beginning because of the initial separation
 
                 if tstop == True:
                     print("\n Reactive event found")
@@ -212,6 +217,16 @@ class Molecule:
             jy = 3*i+1
             jz = 3*i+2
             trajfile.write("%3s %15.5f  %15.5f %15.5f  %16.6f  %16.6f %16.6f\n" % (self.atoms[i], self.q[jx]*b2a, self.q[jy]*b2a, self.q[jz]*b2a, self.p[jx], self.p[jy], self.p[jz]))
+
+    def delete_orca_tmp(self):
+        import os
+        import shutil
+
+        folder_name = 'orca_tmp'
+
+        if os.path.exists(folder_name) and os.path.isdir(folder_name):
+            shutil.rmtree(folder_name)
+
 
 
 class Fragment(Molecule):
@@ -337,8 +352,12 @@ class Fragment(Molecule):
         this.rigid      = rigid
         this.random_rot = random_rot
         this.nfix       = nfix
+        
+        if qchem['qchem'] == 'Orca':
+            self.delete_orca_tmp()
 
         return this
+
 
     def Atom_Sampling(self):
         if len(self.atoms) != 1:
@@ -575,6 +594,30 @@ class Collision(Molecule):
 
         return 
 
+
+    def faragments_actual_coordinate(self)
+
+        natom_A = self.fragment_A.natom
+        natom_B = self.fragment_B.natom
+
+        comA = self.fragment_A.center_of_mass()
+        comB = self.fragment_B.center_of_mass()
+
+        com_dist = np.linalg.norm(np.array(com1) - np.array(com2))
+        return com_dist
+
+    def faragment_com_distance(self)
+
+        natom_A = self.fragment_A.natom
+        natom_B = self.fragment_B.natom
+
+        comA = self.fragment_A.center_of_mass()
+        comB = self.fragment_B.center_of_mass()
+
+        com_dist = np.linalg.norm(np.array(com1) - np.array(com2))
+        return com_dist
+
+
     def Sample_Bimolecular_Reactants(self, **kwargs):
         #---------------------------------------------
         # Sample the internal motions of a fragment:
@@ -606,7 +649,7 @@ class Collision(Molecule):
         self.Sample_Bimolecular_Reactants(**kwargs)
 
         self.run_trajectory(integrator=integrator, timestep=timestep, startstep=startstep, maxstep=maxstep,
-                            iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=restart)
+                            iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=restart, collision=True)
 
 
         
@@ -669,7 +712,7 @@ if __name__ == '__main__':
      '''
 
 
-    seed = 220922
+    seed = 220022
     random.seed(seed)
 
     qcinput = {
@@ -741,7 +784,7 @@ if __name__ == '__main__':
 
     fname_zzallyl = "ZZAllyl"
     traj_file_diene = "traj_" + fname_zzallyl + ".xyz"
-    zzallyl  = Fragment.Polyatom_Init(fname=fname_zzallyl, qchem=qcinput_Orca, xyz=xyz_zzallyl, random_rot=True)
+    zzallyl  = Fragment.Polyatom_Init(fname=fname_zzallyl, qchem=qcinput, xyz=xyz_zzallyl, random_rot=True)
     zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
 
     clorine = Fragment.Atom_Init(atoms=['Cl'])
@@ -753,7 +796,7 @@ if __name__ == '__main__':
     fname_oxygen = 'O2'
 
     oxygen = Fragment.Diatom_Init(fname=fname_oxygen, atoms=['O','O'], req=req_O2, omega=omega_O2, random_rot=True, diatom='harmonic')
-    oxygen.Specify_Mode_Sampling(init_rot_type='Jfix', nvib=0, jrot=0)
+    oxygen.Specify_Mode_Sampling(init_rot_type='Jfix', nvib=3, jrot=0)
 
     print("--------- ZZ-OH-Allyl Isoprenyl radical--------")
     zzallyl.print_mode_sampling()
@@ -764,16 +807,16 @@ if __name__ == '__main__':
     print()
 
 
-    reaction =  Collision(zzallyl, oxygen, qchem=qcinput_Orca) 
+    reaction =  Collision(zzallyl, oxygen, qchem=qcinput) 
     #reaction.Specify_Collision_Sampling(Rini=7.0, bmax=4.0, bsampling=True, Ecoll=None, Ecoll_thermal=True, temp=300.0)
-    reaction.Specify_Collision_Sampling(Rini=7.0, bmax=5.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
+    reaction.Specify_Collision_Sampling(Rini=5.0, bmax=5.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
 
 
     backfile = "reaction_backup.xyz"
     traj_file_reaction = "traj_" + fname_zzallyl + "+" + fname_oxygen + ".xyz"
 
 
-    reaction.sample_and_run_collision(integrator='verlet', timestep=0.5, maxstep=3000, iprint=2, traj_file=traj_file_reaction, backfile=backfile)
+    reaction.sample_and_run_collision(integrator='verlet', timestep=0.5, maxstep=2000, iprint=4, traj_file=traj_file_reaction, backfile=backfile)
 
 
 

@@ -1,0 +1,7 @@
+orca_tmp/orca_file_for_abinitioMD        # BaseName
+orca_tmp/orca_file_for_abinitioMD        # GBWName
+102       # number of calculations
+4       # number of CPUs        
+1       # program flag
+0       # printing flag
+1       # free_end
