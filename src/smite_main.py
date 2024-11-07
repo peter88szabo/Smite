@@ -10,6 +10,8 @@ from utils.format_and_print       import print_trajectory
 from utils.atomic_overlap         import check_atomic_overlap
 from utils.atomic_masses          import get_mass_vector 
 from utils.clustering             import cluster_chemical_formulas
+from utils.distance               import test_to_stop_general
+from utils.distance               import test_to_stop_specific
 
 from normalmode.hessian           import getHessian
 from normalmode.eckart            import eckart_transform
@@ -57,6 +59,7 @@ class Molecule:
         self.qchem      = None 
         self.last_step  = last_step
         self.Rstop      = None 
+        self.pairstop   = None
 
 
     def center_of_mass(self, q, mass):
@@ -127,6 +130,13 @@ class Molecule:
         tstop = False
         Rcom_min = 1000000.0
 
+        if collision:
+            if self.Rstop < self.Rini:
+                raise ValueError("Rstop must be larger than Rini")
+            if self.pairstop is None:
+                raise ValueError("In case of collision, the pairs_to_stop dictionary must be given")
+            
+
         with open(traj_file, "a") as file_trj:
             for istep in range(startstep, maxstep):
 
@@ -146,25 +156,26 @@ class Molecule:
                     if collision:
                         Rcom_actual = self.reactants_cenmass_distance()
 
-                        print(f"step: {istep:<10d} t[fs]: {istep*dt/c6:<12.2f}  V[Eh]: {V:<15.5f} E[Eh]: {E:<15.5f} dE[cm-1]: {dE*c5:17.3f} T[K]: {act_temp:<10.2f} Rcom[A]: {Rcom_actual*b2a:8.2f}")
-
                         if Rcom_actual < Rcom_min:
                             Rcom_min = Rcom_actual
 
-                        if Rcom_actual < 0.8*self.Rini: #preventing the intiail detection of the two reactants as reactive event
-                            tstop = self.test_to_stop(tol=self.Rstop)
+                        tstop, channel = test_to_stop_specific(q=self.q, pairs_to_test=self.pairstop)
+
+                        print(f"step: {istep:<10d} t[fs]: {istep*dt/c6:<12.1f}  V[Eh]: {V:<15.5f} E[Eh]: {E:<15.5f} dE[cm-1]: {dE*c5:<17.3f} T[K]: {act_temp:<10.2f} Rcom[A]: {Rcom_actual*b2a:8.2f}")
+
                     else: #if not collision (just unimolecular dynamics) then we can ran the test anytime
                         print(f"step: {step:<10d} t[fs]: {istep*dt/c6:<12.2f}  V[Eh]: {V:<15.5f} E[Eh]: {E:<15.5f} dE[cm-1]: {dE*c5:<17.3f} T[K]: {act_temp:<10.2f}")
-                        tstop = self.test_to_stop(tol=self.Rstop)
+                        tstop = test_to_stop_general(q=self.q, tol=self.Rstop)
 
 
                     if tstop:
                         #minPts: minum number of points to be a cluster
                         #eps: in Angstrom the tolerance within can be considered something as cluster
 
-                        formula = cluster_chemical_formulas(self.q, self.atoms, eps=2.1, minPts=2)
+                        formula = cluster_chemical_formulas(self.q, self.atoms, eps=4.2, minPts=2)
 
                         print("\n Reactive event found: ", formula)
+                        print("Reaction channel: ", channel)
                         break
                 #-----------------------------------------------------------------------------
 
@@ -212,18 +223,6 @@ class Molecule:
         Ekin=sum(self.p*self.p/self.wmass)*0.5
 
         return 2.0*Ekin/float(len(self.p)-self.nfix)/Rgas
-
-    def test_to_stop(self, tol=16.0):
-        coord = np.reshape(self.q, (-1, 3))
-
-        #distance matrix:
-        dist_mat = np.sqrt(np.sum((coord[:, np.newaxis, :] - coord[np.newaxis, :, :]) ** 2, axis=-1))
-
-        too_large = np.any(dist_mat[np.tril_indices(dist_mat.shape[0], -1)] > tol)
-
-        return too_large
-
-
 
     def merge_with(self, other_molecule):
         if not isinstance(other_molecule, Molecule):
@@ -556,7 +555,7 @@ class Collision(Molecule):
         self.sampling_set = False
         self.Rcom = None
 
-    def Specify_Collision_Sampling(self, Rini=None, bmax=None, bsampling=False, Ecoll=None, Ecoll_thermal=False, temp=None):
+    def Specify_Collision_Sampling(self, Rini=None, bmax=None, bsampling=False, Ecoll=None, Ecoll_thermal=False, temp=None, pairs_to_stop=None):
 
         if Rini == None or bmax == None or (Ecoll == None and Ecoll_thermal==False) or (Ecoll_thermal==True and temp==None):
             raise ValueError("Rini, bmax and Ecoll (or Ecoll_thermal) must be give in the input of Specify_Collision_Sampling()")
@@ -576,6 +575,7 @@ class Collision(Molecule):
         self.Ecoll_thermal = Ecoll_thermal
         self.tempcoll = temp
         self.sampling_set = True
+        self.pairstop = pairs_to_stop
     
     def Set_Relative_Init_Coords(self):
 
@@ -750,8 +750,17 @@ if __name__ == '__main__':
     H   -3.35772393043684      0.25312017851188      3.15850065923520
      '''
 
+    #vinyl radical optimized by XTB-spinpol
+    xyz_vinyl = '''
+    C           -0.06765881401168        0.36069437750287        0.21726087063540
+    C           -0.02989301947210        0.05415854223373        1.47236819314274
+    H            0.88885859725297        0.01810805651872        2.06187426829113
+    H           -0.92319008305886       -0.19134188210751        2.02827103745251
+    H            0.58952031928966        0.63203190585219       -0.57444136952178
+    '''
 
-    seed = 220022
+
+    seed = 22222112
     random.seed(seed)
 
     qcinput = {
@@ -763,6 +772,18 @@ if __name__ == '__main__':
     'charge': 0,
     'multiplicity': 2,
     'additional': '--gfnff --acc 50 --iterations 1000 --spinpol --tblite',
+    'wfu': False
+    }
+
+    qcinput_vinyl = {
+    'qchem': 'XTB',
+    'path': '/home/peter/orca_6_0_0/xtb',
+    'nproc': 8,
+    'functional': '',
+    'basis': '',
+    'charge': 0,
+    'multiplicity': 2,
+    'additional': '--acc 50 --iterations 1000 --spinpol --tblite',
     'wfu': False
     }
 
@@ -821,10 +842,14 @@ if __name__ == '__main__':
     #diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum, fix_temp=fix_temp)
     #diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
 
-    fname_zzallyl = "ZZAllyl"
-    traj_file_diene = "traj_" + fname_zzallyl + ".xyz"
-    zzallyl  = Fragment.Polyatom_Init(fname=fname_zzallyl, qchem=qcinput, xyz=xyz_zzallyl, random_rot=True)
-    zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
+    #fname_zzallyl = "ZZAllyl"
+    #traj_file_diene = "traj_" + fname_zzallyl + ".xyz"
+    #zzallyl  = Fragment.Polyatom_Init(fname=fname_zzallyl, qchem=qcinput, xyz=xyz_zzallyl, random_rot=True)
+    #zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
+
+    fname_vinyl = "vinyl"
+    vinyl = Fragment.Polyatom_Init(fname=fname_vinyl, qchem=qcinput_vinyl, xyz=xyz_vinyl, random_rot=True)
+    vinyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0)
 
     clorine = Fragment.Atom_Init(atoms=['Cl'])
     fname_atom = 'Cl'
@@ -834,28 +859,92 @@ if __name__ == '__main__':
     omega_O2 = 1580.0
     fname_oxygen = 'O2'
 
+    req_NO = 1.1557 #ground state as Pi-doublet from XTB spinpol
+    omega_NO = 1948.36
+    fname_NO = 'NO'
+
     oxygen = Fragment.Diatom_Init(fname=fname_oxygen, atoms=['O','O'], req=req_O2, omega=omega_O2, random_rot=True, diatom='harmonic')
-    oxygen.Specify_Mode_Sampling(init_rot_type='Jfix', nvib=3, jrot=0)
+    oxygen.Specify_Mode_Sampling(init_rot_type='Jfix', nvib=0, jrot=0)
 
-    print("--------- ZZ-OH-Allyl Isoprenyl radical--------")
-    zzallyl.print_mode_sampling()
-    print("--------- ZZ-OH-Allyl Isoprenyl radical DONE--------")
+    NO = Fragment.Diatom_Init(fname=fname_NO, atoms=['N','O'], req=req_NO, omega=omega_NO, random_rot=True, diatom='harmonic')
+    NO.Specify_Mode_Sampling(init_rot_type='Jfix', nvib=0, jrot=0)
+
+    #print("--------- ZZ-OH-Allyl Isoprenyl radical--------")
+    #zzallyl.print_mode_sampling()
+    #print("--------- ZZ-OH-Allyl Isoprenyl radical DONE--------")
+
+    print("--------- Vinyl radical--------")
+    vinyl.print_mode_sampling()
+    print("--------- Vinyl radical DONE--------")
 
 
+    '''
+    pairs_to_test = {
+    'capture_gamma_1': [((2, 17), 'LT', 1.5)],  
+    'capture_gamma_2': [((2, 18), 'LT', 1.5)],  
+    'capture_alpha_1': [((6, 17), 'LT', 1.5)],  
+    'capture_alpha_2': [((6, 18), 'LT', 1.5)],  
+    'reaction_1': [((2, 18), 'GT', 9.0), ((2, 17), 'GT', 9.0)],  
+    'reaction_2': [((4, 5), 'GT', 9.0)],  
+    # add more channels and pairs as needed
+    }
+
+    
     print("\nReaction of ZZ-OH-allyl + O2")
     print()
 
 
     reaction =  Collision(zzallyl, oxygen, qchem=qcinput) 
-    #reaction.Specify_Collision_Sampling(Rini=7.0, bmax=4.0, bsampling=True, Ecoll=None, Ecoll_thermal=True, temp=300.0)
-    reaction.Specify_Collision_Sampling(Rini=5.5, bmax=4.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
+    reaction.Specify_Collision_Sampling(Rini=5.5, bmax=3.0, bsampling=True, Ecoll_thermal=True, temp=300.0, pairs_to_stop=pairs_to_test)
 
 
     backfile = "reaction_backup.xyz"
     traj_file_reaction = "traj_" + fname_zzallyl + "+" + fname_oxygen + ".xyz"
 
 
-    reaction.sample_and_run_collision(integrator='verlet', timestep=0.5, maxstep=2000, iprint=4, Rstop=12.0, traj_file=traj_file_reaction, backfile=backfile)
+    reaction.sample_and_run_collision(integrator='verlet', timestep=0.5, maxstep=10000, iprint=4, traj_file=traj_file_reaction, backfile=backfile)
+    '''
+
+
+    pairs_to_test = {
+    'capture_ON-C1': [((0, 5), 'LT', 1.5)],  
+    'capture_ON-C2': [((1, 5), 'LT', 1.5)],  
+    'capture_NO-C1': [((0, 6), 'LT', 1.5)],  
+    'capture_NO-C2': [((1, 6), 'LT', 1.5)],  
+    'reaction_1': [((0, 5), 'GT', 8.0), ((0, 6), 'GT', 8.0)],  
+    # add more channels and pairs as needed
+    }
+
+
+    qcinput_vinyl_singlet = {
+    'qchem': 'XTB',
+    'path': '/home/peter/orca_6_0_0/xtb',
+    'nproc': 8,
+    'functional': '',
+    'basis': '',
+    'charge': 0,
+    'multiplicity': 1,
+    'additional': '--acc 50 --iterations 1000 --spinpol --tblite',
+    'wfu': False
+    }
+
+
+
+
+
+    print("\nReaction of Vinyil + NO")
+    print()
+
+    reaction =  Collision(vinyl, NO, qchem=qcinput_vinyl_singlet)
+    reaction.Specify_Collision_Sampling(Rini=6.0, bmax=3.0, bsampling=True, Ecoll_thermal=True, temp=300.0, pairs_to_stop=pairs_to_test)
+
+
+    backfile = "reaction_backup.xyz"
+    traj_file_reaction = "traj_" + fname_vinyl + "+" + fname_NO + ".xyz"
+
+
+    reaction.sample_and_run_collision(integrator='verlet', timestep=0.5, maxstep=10000, iprint=4, traj_file=traj_file_reaction, backfile=backfile)
+
 
 
 
