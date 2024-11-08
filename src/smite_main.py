@@ -61,6 +61,24 @@ class Molecule:
         self.Rstop      = None 
         self.pairstop   = None
 
+        self.vrel_ini    = None
+        self.vrel_fin    = None
+        self.vrelfin_sq  = None
+        self.Lorb_ini    = None
+        self.Lorb_fin    = None
+        self.Jrot_ini_A  = None
+        self.Jrot_fin_A  = None
+        self.Jrot_ini_B  = None
+        self.Jrot_fin_B  = None
+        self.lifetime    = None
+        self.Evib_ini    = None
+        self.Erot_ini_eq = None
+        self.Erot_ini    = None
+        self.Evib_fin    = None
+        self.Erot_fin    = None
+        self.Erot_fin_eq = None
+        self.bimp_fin    = None
+
 
     def center_of_mass(self, q, mass):
         """
@@ -102,12 +120,18 @@ class Molecule:
         self.q, self.p = velverlet(self.qchem, dt, self.wmass, self.q, self.p, self.atoms)
 
     def run_trajectory(self, integrator='verlet', timestep=1.0, startstep=0, maxstep=100,
-                       iprint=2, traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False, collision=False, Rstop=10.0):
+                       iprint=2, traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False, collision=False, pairs_to_stop=None, Rstop=None):
         file_wf = "wavevfuntion" #or it should be given as class variable from self.fname
 
         b2a = 0.52917721092
+       
         
-        self.Rstop = Rstop/b2a #Angstrom to Bohr #reactive event condition for trajectory 
+        if pairs_to_stop is not None and Rstop is None:
+            self.pairstop = pairs_to_stop
+        elif pairs_to_stop is None and Rstop is not None:
+            self.Rstop = Rstop/b2a #Angstrom to Bohr #reactive event condition for trajectory 
+        else:
+            raise ValueError("\nEither Rstop or pairs_to_stop must be given in the input")
 
         #--------------------------------------------------------------------------------------
         if not restart:
@@ -130,11 +154,9 @@ class Molecule:
         tstop = False
         Rcom_min = 1000000.0
 
-        if collision:
+        if collision and self.Rstop is not None:
             if self.Rstop < self.Rini:
                 raise ValueError("Rstop must be larger than Rini")
-            if self.pairstop is None:
-                raise ValueError("In case of collision, the pairs_to_stop dictionary must be given")
             
 
         with open(traj_file, "a") as file_trj:
@@ -159,14 +181,21 @@ class Molecule:
                         if Rcom_actual < Rcom_min:
                             Rcom_min = Rcom_actual
 
-                        tstop, channel = test_to_stop_specific(q=self.q, pairs_to_test=self.pairstop)
+                        if self.pairstop is not None and self.Rstop is None:
+                            tstop, channel = test_to_stop_specific(q=self.q, pairs_to_test=self.pairstop)
+                        elif self.pairstop is None and self.Rstop is not None:
+                            tstop = test_to_stop_general(q=self.q, tol=self.Rstop)
+                            channel = 'Not Specified'
 
                         print(f"step: {istep:<10d} t[fs]: {istep*dt/c6:<12.1f}  V[Eh]: {V:<15.5f} E[Eh]: {E:<15.5f} dE[cm-1]: {dE*c5:<17.3f} T[K]: {act_temp:<10.2f} Rcom[A]: {Rcom_actual*b2a:8.2f}")
 
                     else: #if not collision (just unimolecular dynamics) then we can ran the test anytime
                         print(f"step: {step:<10d} t[fs]: {istep*dt/c6:<12.2f}  V[Eh]: {V:<15.5f} E[Eh]: {E:<15.5f} dE[cm-1]: {dE*c5:<17.3f} T[K]: {act_temp:<10.2f}")
-                        tstop = test_to_stop_general(q=self.q, tol=self.Rstop)
-
+                        if self.pairs_to_stop is not None and self.Rstop is None:
+                            tstop, channel = test_to_stop_specific(q=self.q, pairs_to_test=self.pairstop)
+                        elif self.pairs_to_stop is None and self.Rstop is not None:
+                            tstop = test_to_stop_general(q=self.q, tol=self.Rstop)
+                            channel = 'Not Specified'
 
                     if tstop:
                         #minPts: minum number of points to be a cluster
@@ -174,8 +203,14 @@ class Molecule:
 
                         formula = cluster_chemical_formulas(self.q, self.atoms, eps=4.2, minPts=2)
 
-                        print("\n Reactive event found: ", formula)
-                        print("Reaction channel: ", channel)
+                        ###here we need analysis function that calculate based on the number and type of the fragments:
+                        #  - final Evib, Erot, Erel, Lorb_fin, Jrot_fin, vrel_fin 
+                        #  - scattering angles
+                        #  - or spectrum if is requested
+                        #  - quantum number
+                        #  - lifetime
+
+                        print("\n Reactive event found: ", formula, "    Reaction channel: ", channel)
                         break
                 #-----------------------------------------------------------------------------
 
@@ -461,7 +496,7 @@ class Fragment(Molecule):
 
 
     def sample_and_run_trajectory(self, integrator='verlet', timestep=1.0, startstep=0, maxstep=100, iprint=1,
-                                  traj_file='trajectory.xyz', backfile="checkpoint.xyz", Rstop=10.0):
+                                  traj_file='trajectory.xyz', backfile="checkpoint.xyz", Rstop=None, pairs_to_stop=None):
         #---------------------------------------------
         # Sample the internal motions of a fragment:
         #---------------------------------------------
@@ -475,8 +510,12 @@ class Fragment(Molecule):
             raise ValueError("Wrong sampling option in sample_and_run_trajectory() function")
         #---------------------------------------------
 
+        if pairs_to_stop is None and Rstop is None:
+            raise ValueError("\nEither Rstop or pairs_to_stop must be given in the input")
+
+
         self.run_trajectory(integrator=integrator, timestep=timestep, startstep=startstep, maxstep=maxstep,
-                            iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=False, Rstop=Rstop)
+                            iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=False, Rstop=Rstop, pairs_to_stop=pairs_to_stop)
 
 
     def print_mode_sampling(self):
@@ -555,7 +594,7 @@ class Collision(Molecule):
         self.sampling_set = False
         self.Rcom = None
 
-    def Specify_Collision_Sampling(self, Rini=None, bmax=None, bsampling=False, Ecoll=None, Ecoll_thermal=False, temp=None, pairs_to_stop=None):
+    def Specify_Collision_Sampling(self, Rini=None, bmax=None, bsampling=False, Ecoll=None, Ecoll_thermal=False, temp=None):
 
         if Rini == None or bmax == None or (Ecoll == None and Ecoll_thermal==False) or (Ecoll_thermal==True and temp==None):
             raise ValueError("Rini, bmax and Ecoll (or Ecoll_thermal) must be give in the input of Specify_Collision_Sampling()")
@@ -575,8 +614,7 @@ class Collision(Molecule):
         self.Ecoll_thermal = Ecoll_thermal
         self.tempcoll = temp
         self.sampling_set = True
-        self.pairstop = pairs_to_stop
-    
+
     def Set_Relative_Init_Coords(self):
 
         if self.sampling_set == False:
@@ -683,12 +721,16 @@ class Collision(Molecule):
         return
 
     def sample_and_run_collision(self, integrator='verlet', timestep=1.0, startstep=0, maxstep=100, iprint=2,
-                                      traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False, Rstop=10.0, **kwargs):
+                                      traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False, pairs_to_stop=None, Rstop=None, **kwargs):
+
+        if pairs_to_stop is None and Rstop is None:
+            raise ValueError("\nEither Rstop or pairs_to_stop must be given in the input")
+
 
         self.Sample_Bimolecular_Reactants(**kwargs)
 
         self.run_trajectory(integrator=integrator, timestep=timestep, startstep=startstep, maxstep=maxstep,
-                            iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=restart, collision=True, Rstop=Rstop)
+                            iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=restart, collision=True, Rstop=Rstop, pairs_to_stop=pairs_to_stop)
 
 
         
@@ -760,13 +802,13 @@ if __name__ == '__main__':
     '''
 
 
-    seed = 22222112
+    seed = 91885112
     random.seed(seed)
 
     qcinput = {
     'qchem': 'XTB',
     'path': '/home/peter/orca_6_0_0/xtb',
-    'nproc': 8,
+    'nproc': 4,
     'functional': '',
     'basis': '',
     'charge': 0,
@@ -794,7 +836,7 @@ if __name__ == '__main__':
     'functional': 'HF-3c',
     'basis': '',
     'charge': 0,
-    'multiplicity': 2,
+    'multiplicity': 1,
     'additional': '',
     'wfu': False
     }
@@ -911,7 +953,7 @@ if __name__ == '__main__':
     'capture_ON-C2': [((1, 5), 'LT', 1.5)],  
     'capture_NO-C1': [((0, 6), 'LT', 1.5)],  
     'capture_NO-C2': [((1, 6), 'LT', 1.5)],  
-    'reaction_1': [((0, 5), 'GT', 8.0), ((0, 6), 'GT', 8.0)],  
+    'reaction_1': [((0, 5), 'GT', 7.0), ((0, 6), 'GT', 7.0)],  
     # add more channels and pairs as needed
     }
 
@@ -919,12 +961,12 @@ if __name__ == '__main__':
     qcinput_vinyl_singlet = {
     'qchem': 'XTB',
     'path': '/home/peter/orca_6_0_0/xtb',
-    'nproc': 8,
+    'nproc': 4,
     'functional': '',
     'basis': '',
     'charge': 0,
     'multiplicity': 1,
-    'additional': '--acc 50 --iterations 1000 --spinpol --tblite',
+    'additional': '--acc 100 --iterations 1000 --spinpol --tblite',
     'wfu': False
     }
 
@@ -936,14 +978,14 @@ if __name__ == '__main__':
     print()
 
     reaction =  Collision(vinyl, NO, qchem=qcinput_vinyl_singlet)
-    reaction.Specify_Collision_Sampling(Rini=6.0, bmax=3.0, bsampling=True, Ecoll_thermal=True, temp=300.0, pairs_to_stop=pairs_to_test)
+    reaction.Specify_Collision_Sampling(Rini=5.5, bmax=3.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
 
 
     backfile = "reaction_backup.xyz"
     traj_file_reaction = "traj_" + fname_vinyl + "+" + fname_NO + ".xyz"
 
 
-    reaction.sample_and_run_collision(integrator='verlet', timestep=0.5, maxstep=10000, iprint=4, traj_file=traj_file_reaction, backfile=backfile)
+    reaction.sample_and_run_collision(integrator='verlet', timestep=0.5, maxstep=10000, pairs_to_stop=pairs_to_test, iprint=4, traj_file=traj_file_reaction, backfile=backfile)
 
 
 
