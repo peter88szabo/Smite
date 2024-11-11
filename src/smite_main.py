@@ -187,10 +187,10 @@ class Molecule:
                             tstop = test_to_stop_general(q=self.q, tol=self.Rstop)
                             channel = 'Not Specified'
 
-                        print(f"step: {istep:<10d} t[fs]: {istep*dt/c6:<12.1f}  V[Eh]: {V:<15.5f} E[Eh]: {E:<15.5f} dE[cm-1]: {dE*c5:<17.3f} T[K]: {act_temp:<10.2f} Rcom[A]: {Rcom_actual*b2a:8.2f}")
+                        print(f"step: {istep:<10d} t[fs]: {istep*dt/c6:<12.1f}  V[Eh]: {V:<16.6f} E[Eh]: {E:<16.6f} dE[kJ]: {dE*c7:16.3f}    T[K]: {act_temp:<10.2f} Rcom[A]: {Rcom_actual*b2a:8.2f}")
 
                     else: #if not collision (just unimolecular dynamics) then we can ran the test anytime
-                        print(f"step: {step:<10d} t[fs]: {istep*dt/c6:<12.2f}  V[Eh]: {V:<15.5f} E[Eh]: {E:<15.5f} dE[cm-1]: {dE*c5:<17.3f} T[K]: {act_temp:<10.2f}")
+                        print(f"step: {step:<10d} t[fs]: {istep*dt/c6:<12.2f}  V[Eh]: {V:<16.6f} E[Eh]: {E:<16.6f} dE[kJ]: {dE*c7:16.3f}     T[K]: {act_temp:<10.2f}")
                         if self.pairs_to_stop is not None and self.Rstop is None:
                             tstop, channel = test_to_stop_specific(q=self.q, pairs_to_test=self.pairstop)
                         elif self.pairs_to_stop is None and self.Rstop is not None:
@@ -417,6 +417,7 @@ class Fragment(Molecule):
         print_frequencies(fname,freq_all)
 
         this = cls(atoms=atoms, mass=mass, q_ini=q_eq, p_ini=p_ini)
+
 
         this.fname      = fname
         this.hessFile   = hessFile
@@ -711,6 +712,7 @@ class Collision(Molecule):
         sample_fragment(self.fragment_A)
         sample_fragment(self.fragment_B)
 
+
         self.Set_Relative_Init_Coords()
 
         self.overlap = check_atomic_overlap(self.atoms, self.q)
@@ -802,7 +804,7 @@ if __name__ == '__main__':
     '''
 
 
-    seed = 91885112
+    seed = 12261112
     random.seed(seed)
 
     qcinput = {
@@ -953,7 +955,7 @@ if __name__ == '__main__':
     'capture_ON-C2': [((1, 5), 'LT', 1.5)],  
     'capture_NO-C1': [((0, 6), 'LT', 1.5)],  
     'capture_NO-C2': [((1, 6), 'LT', 1.5)],  
-    'reaction_1': [((0, 5), 'GT', 7.0), ((0, 6), 'GT', 7.0)],  
+    'reaction_1': [((0, 5), 'GT', 10.0), ((0, 6), 'GT', 10.0)],  
     # add more channels and pairs as needed
     }
 
@@ -977,8 +979,9 @@ if __name__ == '__main__':
     print("\nReaction of Vinyil + NO")
     print()
 
-    reaction =  Collision(vinyl, NO, qchem=qcinput_vinyl_singlet)
-    reaction.Specify_Collision_Sampling(Rini=5.5, bmax=3.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
+    #reaction =  Collision(vinyl, NO, qchem=qcinput_vinyl_singlet)
+    reaction =  Collision(vinyl, NO, qchem=qcinput_Orca)
+    reaction.Specify_Collision_Sampling(Rini=8.0, bmax=4.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
 
 
     backfile = "reaction_backup.xyz"
