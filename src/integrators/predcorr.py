@@ -9,13 +9,12 @@ class PredCorr:
         self.ab_coeff = None
         self.am_coeff = None
         self.step = -1
-        self.save_veloc = np.empty((order, ndim))
-        self.save_force = np.empty((order, ndim))
+        self.save_veloc = np.zeros((order, ndim))
+        self.save_force = np.zeros((order, ndim))
 
         self.get_adbash_admoul_coeffs()
 
     def predcorr(self, qcinput, dt, wmass, q, p, atoms):
-                
         self.step += 1
 
         if(self.step < self.order):
@@ -58,7 +57,7 @@ class PredCorr:
         Initializer for arbitrary order Adams-Bashford---Adams-Moulton
         predictor-corrector integrator for Hamiltonian systems
         '''
-        if self.step > self.order:
+        if (self.step + 1) > self.order:
             raise ValueError("the initializer step number must be smaller or equal than the order of the Predictor Corrector")
 
         q,p = velverlet(qcinput, dt, wmass, q, p, atoms)
@@ -69,60 +68,59 @@ class PredCorr:
         return q, p
 
     def call_predcorr(self, qcinput, dt, wmass, q, p, atoms):
-        '''
+        """
         Arbitrary order Adams-Bashford--Adams-Moulton
-        predictor-corrector integrator for Hamiltonian systems
-        '''
-        q_old = q
-        p_old = p
-        q_pred = np.zeros(len(q))
-        p_pred = np.zeros(len(p))
-        #----------------------------------------------------------
-        #   Adams-Bashford predictor step
-        #----------------------------------------------------------
-        for i in range(len(q)):
-            sum_q = 0.0
-            sum_p = 0.0
-            for j in range(len(self.ab_coeff)):
-                sum_q +=  self.ab_coeff[j] * self.save_veloc[j,i]
-                sum_p +=  self.ab_coeff[j] * self.save_force[j,i]
+        predictor-corrector integrator for Hamiltonian systems.
+        """
+        q_old = np.copy(q)
+        p_old = np.copy(p)
+        q_pred = np.zeros_like(q)
+        p_pred = np.zeros_like(p)
 
-            q_pred[i] = q_old[i] + sum_q * dt
-            p_pred[i] = p_old[i] + sum_p * dt
+        # ----------------------------------------------------------
+        # Adams-Bashford predictor step
+        # ----------------------------------------------------------
+        sum_q = np.zeros_like(q)
+        sum_p = np.zeros_like(p)
+        for j in range(self.order):
+            sum_q += self.ab_coeff[j] * self.save_veloc[j, :]
+            sum_p += self.ab_coeff[j] * self.save_force[j, :]
+
+        q_pred = q_old + sum_q * dt
+        p_pred = p_old + sum_p * dt
 
         force_pred = force_calc(qcinput, q_pred, atoms)
 
-        #----------------------------------------------------------
-        #   Adams-Moulton corrector step
-        #----------------------------------------------------------
-        for i in range(len(q)):
-            sum_q = 0.0
-            sum_p = 0.0
-            for j in range(1,(len(self.am_coeff)-1)): #j=2,order
-                sum_q += self.am_coeff[j-1] * self.save_veloc[j,i]
-                sum_p += self.am_coeff[j-1] * self.save_force[j,i]
-            #the last segment with the updated force and p from the predictor step:
-            sum_q += self.am_coeff[self.order-1] * p_pred[i] / wmass[i]
-            sum_p += self.am_coeff[self.order-1] * force_pred[i]
+        # ----------------------------------------------------------
+        # Adams-Moulton corrector step
+        # ----------------------------------------------------------
+        sum_q = np.zeros_like(q)
+        sum_p = np.zeros_like(p)
+        for j in range(1, self.order):
+            print("asdasd:", j, self.am_coeff[j-1]*24)
+            sum_q += self.am_coeff[j-1] * self.save_veloc[j,:]
+            sum_p += self.am_coeff[j-1] * self.save_force[j,:]
 
-            q[i] = q_old[i] + sum_q * dt
-            p[i] = p_old[i] + sum_p * dt
+        # The last segment with updated force and momentum from the predictor step
+        sum_q += self.am_coeff[-1] * p_pred / wmass
+        sum_p += self.am_coeff[-1] * force_pred
 
-        #----------------------------------------------------------
-        #   Save the new velocity and force variables
-        #----------------------------------------------------------
-        force = force_calc(qcinput, q, atoms)
+        q_new = q_old + sum_q * dt
+        p_new = p_old + sum_p * dt
 
-        # here we shif index of the previous elements by one
-        # and also discarding the last element
-        for j in range (1,self.order):
-            self.save_veloc[j-1,:] = self.save_veloc[j,:]
-            self.save_force[j-1,:] = self.save_force[j,:]
+        # ----------------------------------------------------------
+        # Save the new velocity and force variables
+        # ----------------------------------------------------------
+        force_new = force_calc(qcinput, q_new, atoms)  # Recalculate force with corrected q
 
-        #the new last element will be the new propageted q and p:
-        self.save_veloc[self.order-1,:] = p / wmass
-        self.save_force[self.order-1,:] = force
+        # Shift indices of previous elements and discard the last element
+        for j in range(1, self.order):
+            self.save_veloc[j - 1, :] = self.save_veloc[j, :]
+            self.save_force[j - 1, :] = self.save_force[j, :]
 
-        return q, p
+        # Update the last element with newly propagated q and p
+        self.save_veloc[-1, :] = p_new / wmass
+        self.save_force[-1, :] = force_new
 
+        return q_new, p_new
 

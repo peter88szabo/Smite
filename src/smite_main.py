@@ -36,9 +36,10 @@ from integrators.symplectic       import Symplectic
 from integrators.sprk             import SPRK
 from integrators.predcorr         import PredCorr 
 from integrators.gradient         import Energy
-#from integrators.thermostat       import random_initialize_momenta
-#from integrators.thermostat       import thermo_berendsen 
-#from integrators.thermostat       import thermo_andersen 
+from thermostats.randmomentum     import random_initialize_momenta
+from thermostats.berendsen        import thermo_berendsen 
+from thermostats.andersen         import thermo_andersen 
+#from thermostats.nosehoover       import NoseHoover
 
 class Molecule:
     def __init__(self, atoms=None, mass=None, q_ini=None, p_ini=None, nfix=0, restart=False, xyz_file_path=None):
@@ -129,6 +130,8 @@ class Molecule:
 
     def thermo_berendsen(self, tau, dt, Ttarg):
         self.p = thermo_berendsen(self.nfix, self.p, self.wmass, dt, tau, Ttarg)
+    def thermo_andersen(self, prob, dt, Ttarg):
+        self.p = thermo_andersen(self.nfix, self.p, self.wmass, dt, prob, Ttarg)
 
 
     def run_trajectory(self, integrator='verlet',
@@ -143,7 +146,9 @@ class Molecule:
                              collision=False,
                              pairs_to_stop=None,
                              Rstop=None,
-                             thermostat=None):
+                             thermostat=None,
+                             thermo_param=None,
+                             thermo_temp=None):
 
         file_wf = "wavevfuntion" #or it should be given as class variable from self.fname
 
@@ -262,6 +267,14 @@ class Molecule:
                     self.sprk_single_step(dt, propag)
                 else:
                     raise ValueError("Non existing integrator. You can choose from: leapfrog, verlet, rk4, symplectic(4,6,8) and predcorr(order)")
+
+                if thermostat is not None and (thermo_param or thermo_temp) is None:
+                    raise ValueError("Since thermostate switched on the parameter and temperature must be given")
+                if thermostat == 'berendsen':
+                    tau = thermo_param * 41.341105 #from fs to atomic time unit
+                    self.thermo_berendsen(tau, dt, thermo_temp)
+                if thermostat == 'andersen':
+                    self.thermo_andersen(thermo_param, dt, thermo_temp)
             
 
                 #--------------------------------------------------------------------------
@@ -542,7 +555,8 @@ class Fragment(Molecule):
 
 
     def sample_and_run_trajectory(self, integrator='verlet', integrator_order=4, timestep=1.0, startstep=0, maxstep=100, iprint=1,
-                                  traj_file='trajectory.xyz', backfile="checkpoint.xyz", Rstop=None, pairs_to_stop=None, thermostat=None):
+                                  traj_file='trajectory.xyz', backfile="checkpoint.xyz", Rstop=None, pairs_to_stop=None,
+                                  thermostat=None, thermo_param=None, thermo_temp=None):
         #---------------------------------------------
         # Sample the internal motions of a fragment:
         #---------------------------------------------
@@ -562,7 +576,7 @@ class Fragment(Molecule):
 
         self.run_trajectory(integrator=integrator, integrator_order=integrator_order, timestep=timestep, startstep=startstep, maxstep=maxstep,
                             iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=False,
-                            Rstop=Rstop, pairs_to_stop=pairs_to_stop, thermostat=thermostat)
+                            Rstop=Rstop, pairs_to_stop=pairs_to_stop, thermostat=thermostat, thermo_param=thermo_param, thermo_temp=thermo_temp)
 
 
     def print_mode_sampling(self):
@@ -871,7 +885,7 @@ if __name__ == '__main__':
     '''
 
 
-    seed = 11261112
+    seed = 11269102
     random.seed(seed)
 
     qcinput = {
@@ -951,10 +965,10 @@ if __name__ == '__main__':
 
     diene  = Fragment.Polyatom_Init(fname=fname_diene, qchem=qcinput, xyz=xyz_diene, random_rot=True)
     diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum, fix_temp=fix_temp)
-    #diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
+    diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
 
-    diene.sample_and_run_trajectory(integrator='symplectic', integrator_order=4, timestep=1.0, maxstep=3000, iprint=1,
-                                  traj_file=traj_file_diene, Rstop=10.0) 
+    diene.sample_and_run_trajectory(integrator='leapfrog', integrator_order=4, timestep=1.0, maxstep=3000, iprint=1,
+                                  traj_file=traj_file_diene, Rstop=10.0, thermostat='berendsen', thermo_param=2.0, thermo_temp=500.0) 
 
     fname_zzallyl = "ZZAllyl"
     traj_file_diene = "traj_" + fname_zzallyl + ".xyz"
@@ -964,8 +978,8 @@ if __name__ == '__main__':
     #zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=5)
 
     fname_vinyl = "vinyl"
-    #vinyl = Fragment.Polyatom_Init(fname=fname_vinyl, qchem=qcinput_vinyl, xyz=xyz_vinyl, random_rot=True)
-    #vinyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0)
+    vinyl = Fragment.Polyatom_Init(fname=fname_vinyl, qchem=qcinput_vinyl, xyz=xyz_vinyl, random_rot=True)
+    vinyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0)
 
     clorine = Fragment.Atom_Init(atoms=['Cl'])
     fname_atom = 'Cl'
@@ -1020,9 +1034,8 @@ if __name__ == '__main__':
 
     reaction.sample_and_run_collision(integrator='verlet', timestep=0.5, maxstep=10000, iprint=4, pairs_to_stop=pairs_to_test, traj_file=traj_file_reaction, backfile=backfile)
     '''
-
-
     '''
+
     pairs_to_test = {
     'capture_ON-C1': [((0, 5), 'LT', 1.5)],  
     'capture_ON-C2': [((1, 5), 'LT', 1.5)],  
@@ -1050,16 +1063,15 @@ if __name__ == '__main__':
 
     reaction =  Collision(vinyl, NO, qchem=qcinput_vinyl_singlet)
     #reaction =  Collision(vinyl, NO, qchem=qcinput_Orca)
-    reaction.Specify_Collision_Sampling(Rini=4.0, bmax=4.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
+    reaction.Specify_Collision_Sampling(Rini=6.0, bmax=4.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
 
 
     backfile = "reaction_backup.xyz"
     traj_file_reaction = "traj_" + fname_vinyl + "+" + fname_NO + ".xyz"
 
 
-    reaction.sample_and_run_collision(integrator='predcorr', integrator_order=8, timestep=1.0, maxstep=10000, pairs_to_stop=pairs_to_test, iprint=4, traj_file=traj_file_reaction, backfile=backfile)
+    reaction.sample_and_run_collision(integrator='symplectic', integrator_order=4, timestep=1.0, maxstep=10000, pairs_to_stop=pairs_to_test, iprint=1, traj_file=traj_file_reaction, backfile=backfile)
     '''
-
 
 
    

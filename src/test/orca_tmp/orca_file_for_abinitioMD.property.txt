@@ -1,0 +1,25 @@
+*************************************************
+******************* ORCA 6.0.0 ******************
+*************************************************
+$Calculation_Status
+   &GeometryIndex 0
+   &ListStatus       OUT
+   &version [&Type "String"] "6.0.0"
+   &progName [&Type "String"] "orca"
+   &Status [&Type "String"] "Running"
+$End
+$Geometry
+   &GeometryIndex 1
+   &ListStatus       Out
+   &NAtoms [&Type "Integer"] 7
+   &NCorelessECP [&Type "Integer"] 0
+   &NGhostAtoms [&Type "Integer"] 0
+   &CartesianCoordinates [&Type "Coordinates", &Dim(7,4), &Units "Bohr"] 
+              C     -1.082256273733    0.280958010212   -0.514313428925
+              C      1.136310965320   -0.357173863191    0.399646277705
+              H      1.822660517800    0.669045288473    1.894733614753
+              H      2.507186350108   -1.341054235735   -0.569384128553
+              H     -2.746656267484    1.580824956932    0.050696888306
+              N     10.087359811307   -0.232649810126    0.699176157084
+              O     12.229372611816    0.203641975300    1.034488312969
+$End
