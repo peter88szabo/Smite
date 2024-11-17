@@ -28,10 +28,12 @@ from sampling.diatom              import diatom_rotation_rigidrot_sampling
 from sampling.diatom              import diatom_vibration_harmonic_sampling 
 
 
+from integrators.stormerverlet    import stormer_verlet
 from integrators.leapfrog         import leapfrog
 from integrators.verlet           import velverlet
 from integrators.rungekutta       import rk4
 from integrators.symplectic       import Symplectic
+from integrators.sprk             import SPRK
 from integrators.predcorr         import PredCorr 
 from integrators.gradient         import Energy
 #from integrators.thermostat       import random_initialize_momenta
@@ -104,6 +106,9 @@ class Molecule:
         file_wf = "wavevfuntion" #or it should be given as class variable from self.fname
         return Energy(self.qchem, file_wf, self.q, self.p, self.atoms, self.wmass)
 
+    def stormer_single_step(self, dt):
+        self.q, self.p = stormer_verlet(self.qchem, dt, self.wmass, self.q, self.p, self.atoms)
+
     def leapfrog_single_step(self, dt):
         self.q, self.p = leapfrog(self.qchem, dt, self.wmass, self.q, self.p, self.atoms)
 
@@ -115,6 +120,9 @@ class Molecule:
 
     def symplectic_single_step(self, dt, this_class):
         self.q, self.p = this_class.symplectic(self.qchem, dt, self.wmass, self.q, self.p, self.atoms)
+
+    def sprk_single_step(self, dt, this_class):
+        self.q, self.p = this_class.sprk(self.qchem, dt, self.wmass, self.q, self.p, self.atoms)
 
     def predcorr_single_step(self, dt, this_class):
         self.q, self.p = this_class.predcorr(self.qchem, dt, self.wmass, self.q, self.p, self.atoms)
@@ -180,6 +188,8 @@ class Molecule:
             propag = PredCorr(integrator_order, len(self.q))
         if integrator == 'symplectic':
             propag = Symplectic(integrator_order)
+        if integrator == 'sprk':
+            propag = SPRK(integrator_order)
 
         with open(traj_file, "a") as file_trj:
             for istep in range(startstep, maxstep):
@@ -236,7 +246,9 @@ class Molecule:
                         break
                 #-----------------------------------------------------------------------------
 
-                if integrator == 'verlet':
+                if integrator == 'stormer':
+                    self.stormer_single_step(dt)
+                elif integrator == 'verlet':
                     self.verlet_single_step(dt)
                 elif integrator == 'leapfrog':
                     self.leapfrog_single_step(dt)
@@ -246,6 +258,8 @@ class Molecule:
                     self.predcorr_single_step(dt, propag)
                 elif integrator == 'symplectic':
                     self.symplectic_single_step(dt, propag)
+                elif integrator == 'sprk':
+                    self.sprk_single_step(dt, propag)
                 else:
                     raise ValueError("Non existing integrator. You can choose from: leapfrog, verlet, rk4, symplectic(4,6,8) and predcorr(order)")
             
@@ -939,7 +953,7 @@ if __name__ == '__main__':
     diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum, fix_temp=fix_temp)
     #diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
 
-    diene.sample_and_run_trajectory(integrator='predcorr', integrator_order=8, timestep=1.0, maxstep=3000, iprint=1,
+    diene.sample_and_run_trajectory(integrator='symplectic', integrator_order=4, timestep=1.0, maxstep=3000, iprint=1,
                                   traj_file=traj_file_diene, Rstop=10.0) 
 
     fname_zzallyl = "ZZAllyl"
@@ -947,7 +961,7 @@ if __name__ == '__main__':
     #zzallyl  = Fragment.Polyatom_Init(fname=fname_zzallyl, qchem=qcinput, xyz=xyz_zzallyl, random_rot=True)
     #zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
 ##################    zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Temp', temp=300.0)
-    zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=5)
+    #zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=5)
 
     fname_vinyl = "vinyl"
     #vinyl = Fragment.Polyatom_Init(fname=fname_vinyl, qchem=qcinput_vinyl, xyz=xyz_vinyl, random_rot=True)
