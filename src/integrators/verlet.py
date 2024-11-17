@@ -12,18 +12,3 @@ def velverlet(qcinput, dt, wmass, q, p, atoms):
 
     return (q, p)
 
-
-
-def velverlet(qcinput, dt, wmass, q, p, atoms):
-    force = force_calc(qcinput, q, atoms)
-    p = p + 0.5*force*dt
-
-    q = q + p/wmass*dt
-
-    force = force_calc(qcinput, q, atoms)
-    p = p + 0.5*force*dt
-    return (q, p)
-
-
-
-
