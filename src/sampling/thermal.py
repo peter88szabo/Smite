@@ -80,7 +80,7 @@ def thermal_rot_classic_spherical_top(RT,Inertia):
 #====================================================
 
 
-#====================================================
+#===#################WRONG< here Ixyz must the principial axis=================================================
 def thermal_rot_asymmetric_top_equipart(RT,Ixyz):
 #----------------------------------------------------
 #   Each rotational axis has  RT/2 energy

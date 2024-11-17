@@ -28,8 +28,15 @@ from sampling.diatom              import diatom_rotation_rigidrot_sampling
 from sampling.diatom              import diatom_vibration_harmonic_sampling 
 
 
-from integrators.integrators      import velverlet
+from integrators.leapfrog         import leapfrog
+from integrators.verlet           import velverlet
+from integrators.rungekutta       import rk4
+from integrators.symplectic       import Symplectic
+from integrators.predcorr         import PredCorr 
 from integrators.gradient         import Energy
+#from integrators.thermostat       import random_initialize_momenta
+#from integrators.thermostat       import thermo_berendsen 
+#from integrators.thermostat       import thermo_andersen 
 
 class Molecule:
     def __init__(self, atoms=None, mass=None, q_ini=None, p_ini=None, nfix=0, restart=False, xyz_file_path=None):
@@ -60,25 +67,6 @@ class Molecule:
         self.last_step  = last_step
         self.Rstop      = None 
         self.pairstop   = None
-
-        self.vrel_ini    = None
-        self.vrel_fin    = None
-        self.vrelfin_sq  = None
-        self.Lorb_ini    = None
-        self.Lorb_fin    = None
-        self.Jrot_ini_A  = None
-        self.Jrot_fin_A  = None
-        self.Jrot_ini_B  = None
-        self.Jrot_fin_B  = None
-        self.lifetime    = None
-        self.Evib_ini    = None
-        self.Erot_ini_eq = None
-        self.Erot_ini    = None
-        self.Evib_fin    = None
-        self.Erot_fin    = None
-        self.Erot_fin_eq = None
-        self.bimp_fin    = None
-
 
     def center_of_mass(self, q, mass):
         """
@@ -116,16 +104,43 @@ class Molecule:
         file_wf = "wavevfuntion" #or it should be given as class variable from self.fname
         return Energy(self.qchem, file_wf, self.q, self.p, self.atoms, self.wmass)
 
+    def leapfrog_single_step(self, dt):
+        self.q, self.p = leapfrog(self.qchem, dt, self.wmass, self.q, self.p, self.atoms)
+
     def verlet_single_step(self, dt):
         self.q, self.p = velverlet(self.qchem, dt, self.wmass, self.q, self.p, self.atoms)
 
-    def run_trajectory(self, integrator='verlet', timestep=1.0, startstep=0, maxstep=100,
-                       iprint=2, traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False, collision=False, pairs_to_stop=None, Rstop=None):
+    def rk4_single_step(self, dt):
+        self.q, self.p = rk4(self.qchem, dt, self.wmass, self.q, self.p, self.atoms)
+
+    def symplectic_single_step(self, dt, this_class):
+        self.q, self.p = this_class.symplectic(self.qchem, dt, self.wmass, self.q, self.p, self.atoms)
+
+    def predcorr_single_step(self, dt, this_class):
+        self.q, self.p = this_class.predcorr(self.qchem, dt, self.wmass, self.q, self.p, self.atoms)
+
+    def thermo_berendsen(self, tau, dt, Ttarg):
+        self.p = thermo_berendsen(self.nfix, self.p, self.wmass, dt, tau, Ttarg)
+
+
+    def run_trajectory(self, integrator='verlet',
+                             integrator_order=4,
+                             timestep=1.0,
+                             startstep=0,
+                             maxstep=100,
+                             iprint=2,
+                             traj_file='trajectory.xyz',
+                             backfile="checkpoint.xyz",
+                             restart=False,
+                             collision=False,
+                             pairs_to_stop=None,
+                             Rstop=None,
+                             thermostat=None):
+
         file_wf = "wavevfuntion" #or it should be given as class variable from self.fname
 
         b2a = 0.52917721092
-       
-        
+
         if pairs_to_stop is not None and Rstop is None:
             self.pairstop = pairs_to_stop
         elif pairs_to_stop is None and Rstop is not None:
@@ -157,7 +172,14 @@ class Molecule:
         if collision and self.Rstop is not None:
             if self.Rstop < self.Rini:
                 raise ValueError("Rstop must be larger than Rini")
+        else:
+            Tini, Vini, Eini = self.get_energy()
             
+
+        if integrator == 'predcorr':
+            propag = PredCorr(integrator_order, len(self.q))
+        if integrator == 'symplectic':
+            propag = Symplectic(integrator_order)
 
         with open(traj_file, "a") as file_trj:
             for istep in range(startstep, maxstep):
@@ -190,10 +212,10 @@ class Molecule:
                         print(f"step: {istep:<10d} t[fs]: {istep*dt/c6:<12.1f}  V[Eh]: {V:<16.6f} E[Eh]: {E:<16.6f} dE[kJ]: {dE*c7:16.3f}    T[K]: {act_temp:<10.2f} Rcom[A]: {Rcom_actual*b2a:8.2f}")
 
                     else: #if not collision (just unimolecular dynamics) then we can ran the test anytime
-                        print(f"step: {step:<10d} t[fs]: {istep*dt/c6:<12.2f}  V[Eh]: {V:<16.6f} E[Eh]: {E:<16.6f} dE[kJ]: {dE*c7:16.3f}     T[K]: {act_temp:<10.2f}")
-                        if self.pairs_to_stop is not None and self.Rstop is None:
+                        print(f"step: {istep:<10d} t[fs]: {istep*dt/c6:<12.2f}  V[Eh]: {V:<16.6f} E[Eh]: {E:<16.6f} dE[kJ]: {dE*c7:16.3f}     T[K]: {act_temp:<10.2f}")
+                        if self.pairstop is not None and self.Rstop is None:
                             tstop, channel = test_to_stop_specific(q=self.q, pairs_to_test=self.pairstop)
-                        elif self.pairs_to_stop is None and self.Rstop is not None:
+                        elif self.pairstop is None and self.Rstop is not None:
                             tstop = test_to_stop_general(q=self.q, tol=self.Rstop)
                             channel = 'Not Specified'
 
@@ -216,8 +238,17 @@ class Molecule:
 
                 if integrator == 'verlet':
                     self.verlet_single_step(dt)
+                elif integrator == 'leapfrog':
+                    self.leapfrog_single_step(dt)
+                elif integrator == 'rk4':
+                    self.rk4_single_step(dt)
+                elif integrator == 'predcorr':
+                    self.predcorr_single_step(dt, propag)
+                elif integrator == 'symplectic':
+                    self.symplectic_single_step(dt, propag)
                 else:
-                    raise ValueError("Only Verlet integrator is avaiable at the moment")
+                    raise ValueError("Non existing integrator. You can choose from: leapfrog, verlet, rk4, symplectic(4,6,8) and predcorr(order)")
+            
 
                 #--------------------------------------------------------------------------
                 #Backup:
@@ -496,8 +527,8 @@ class Fragment(Molecule):
         return
 
 
-    def sample_and_run_trajectory(self, integrator='verlet', timestep=1.0, startstep=0, maxstep=100, iprint=1,
-                                  traj_file='trajectory.xyz', backfile="checkpoint.xyz", Rstop=None, pairs_to_stop=None):
+    def sample_and_run_trajectory(self, integrator='verlet', integrator_order=4, timestep=1.0, startstep=0, maxstep=100, iprint=1,
+                                  traj_file='trajectory.xyz', backfile="checkpoint.xyz", Rstop=None, pairs_to_stop=None, thermostat=None):
         #---------------------------------------------
         # Sample the internal motions of a fragment:
         #---------------------------------------------
@@ -515,8 +546,9 @@ class Fragment(Molecule):
             raise ValueError("\nEither Rstop or pairs_to_stop must be given in the input")
 
 
-        self.run_trajectory(integrator=integrator, timestep=timestep, startstep=startstep, maxstep=maxstep,
-                            iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=False, Rstop=Rstop, pairs_to_stop=pairs_to_stop)
+        self.run_trajectory(integrator=integrator, integrator_order=integrator_order, timestep=timestep, startstep=startstep, maxstep=maxstep,
+                            iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=False,
+                            Rstop=Rstop, pairs_to_stop=pairs_to_stop, thermostat=thermostat)
 
 
     def print_mode_sampling(self):
@@ -595,6 +627,27 @@ class Collision(Molecule):
         self.sampling_set = False
         self.Rcom = None
 
+        self.vrel_ini    = None
+        self.vrel_fin    = None
+        self.vrelfin_sq  = None
+        self.Lorb_ini    = None
+        self.Lorb_fin    = None
+        self.Jrot_ini_A  = None
+        self.Jrot_fin_A  = None
+        self.Jrot_ini_B  = None
+        self.Jrot_fin_B  = None
+        self.lifetime    = None
+        self.Erelsq_ini  = None
+        self.Erelsq_fin  = None
+        self.Evib_ini    = None
+        self.Erot_ini_eq = None
+        self.Erot_ini    = None
+        self.Evib_fin    = None
+        self.Erot_fin    = None
+        self.Erot_fin_eq = None
+        self.bimp_fin    = None
+
+
     def Specify_Collision_Sampling(self, Rini=None, bmax=None, bsampling=False, Ecoll=None, Ecoll_thermal=False, temp=None):
 
         if Rini == None or bmax == None or (Ecoll == None and Ecoll_thermal==False) or (Ecoll_thermal==True and temp==None):
@@ -631,7 +684,7 @@ class Collision(Molecule):
             Rgas = (8.3144598/1000.0/2625.5) #in Hartree/K
             RT = Rgas * self.tempcoll
             self.Ecoll = thermal_collision_energy(RT) 
-            print("temp[K], Ecoll[kJ/mol]: ", self.tempcoll, self.Ecoll*2625.5)
+            print(f"temp[K]: {self.tempcoll:<12.2f}     Ecoll[kJ/mol]: {self.Ecoll*2625.5:<12.3f}")
 
         if self.Ecoll == None or self.bmax == None or self.Rini == None:
             raise ValueError("Ecoll (unless it's thermall sampled), bmax and Rini must be given in the input of Set_Relative_Init_Coords()")
@@ -722,7 +775,7 @@ class Collision(Molecule):
 
         return
 
-    def sample_and_run_collision(self, integrator='verlet', timestep=1.0, startstep=0, maxstep=100, iprint=2,
+    def sample_and_run_collision(self, integrator='verlet', integrator_order=4, timestep=1.0, startstep=0, maxstep=100, iprint=2,
                                       traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False, pairs_to_stop=None, Rstop=None, **kwargs):
 
         if pairs_to_stop is None and Rstop is None:
@@ -731,7 +784,7 @@ class Collision(Molecule):
 
         self.Sample_Bimolecular_Reactants(**kwargs)
 
-        self.run_trajectory(integrator=integrator, timestep=timestep, startstep=startstep, maxstep=maxstep,
+        self.run_trajectory(integrator=integrator, integrator_order=integrator_order, timestep=timestep, startstep=startstep, maxstep=maxstep,
                             iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=restart, collision=True, Rstop=Rstop, pairs_to_stop=pairs_to_stop)
 
 
@@ -804,7 +857,7 @@ if __name__ == '__main__':
     '''
 
 
-    seed = 12261112
+    seed = 11261112
     random.seed(seed)
 
     qcinput = {
@@ -815,7 +868,7 @@ if __name__ == '__main__':
     'basis': '',
     'charge': 0,
     'multiplicity': 2,
-    'additional': '--gfnff --acc 50 --iterations 1000 --spinpol --tblite',
+    'additional': '--acc 50 --iterations 1000 --spinpol --tblite',
     'wfu': False
     }
 
@@ -867,8 +920,8 @@ if __name__ == '__main__':
     traj_file_diene = "traj_" + fname_diene + ".xyz"
 
 
-    fix_quantum = [(14, 1),
-                   (15, 2)]
+    fix_quantum = [(14, 0),
+                   (15, 0)]
 
     fix_energy  = [(0, 0.0),
                    (1, 0.0),
@@ -882,18 +935,23 @@ if __name__ == '__main__':
     #water  = Fragment.Polyatom_Init(fname=fname_water, qchem=qcinput, xyz=xyz_water, random_rot=random_rot)
     #water.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum_water)
 
-    #diene  = Fragment.Polyatom_Init(fname=fname_diene, qchem=qcinput, xyz=xyz_diene, random_rot=True)
-    #diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum, fix_temp=fix_temp)
+    diene  = Fragment.Polyatom_Init(fname=fname_diene, qchem=qcinput, xyz=xyz_diene, random_rot=True)
+    diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum, fix_temp=fix_temp)
     #diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
 
-    #fname_zzallyl = "ZZAllyl"
-    #traj_file_diene = "traj_" + fname_zzallyl + ".xyz"
+    diene.sample_and_run_trajectory(integrator='predcorr', integrator_order=8, timestep=1.0, maxstep=3000, iprint=1,
+                                  traj_file=traj_file_diene, Rstop=10.0) 
+
+    fname_zzallyl = "ZZAllyl"
+    traj_file_diene = "traj_" + fname_zzallyl + ".xyz"
     #zzallyl  = Fragment.Polyatom_Init(fname=fname_zzallyl, qchem=qcinput, xyz=xyz_zzallyl, random_rot=True)
     #zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
+##################    zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Temp', temp=300.0)
+    zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=5)
 
     fname_vinyl = "vinyl"
-    vinyl = Fragment.Polyatom_Init(fname=fname_vinyl, qchem=qcinput_vinyl, xyz=xyz_vinyl, random_rot=True)
-    vinyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0)
+    #vinyl = Fragment.Polyatom_Init(fname=fname_vinyl, qchem=qcinput_vinyl, xyz=xyz_vinyl, random_rot=True)
+    #vinyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0)
 
     clorine = Fragment.Atom_Init(atoms=['Cl'])
     fname_atom = 'Cl'
@@ -917,9 +975,9 @@ if __name__ == '__main__':
     #zzallyl.print_mode_sampling()
     #print("--------- ZZ-OH-Allyl Isoprenyl radical DONE--------")
 
-    print("--------- Vinyl radical--------")
-    vinyl.print_mode_sampling()
-    print("--------- Vinyl radical DONE--------")
+    #print("--------- Vinyl radical--------")
+    #vinyl.print_mode_sampling()
+    #print("--------- Vinyl radical DONE--------")
 
 
     '''
@@ -939,17 +997,18 @@ if __name__ == '__main__':
 
 
     reaction =  Collision(zzallyl, oxygen, qchem=qcinput) 
-    reaction.Specify_Collision_Sampling(Rini=5.5, bmax=3.0, bsampling=True, Ecoll_thermal=True, temp=300.0, pairs_to_stop=pairs_to_test)
+    reaction.Specify_Collision_Sampling(Rini=4.5, bmax=5.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
 
 
     backfile = "reaction_backup.xyz"
     traj_file_reaction = "traj_" + fname_zzallyl + "+" + fname_oxygen + ".xyz"
 
 
-    reaction.sample_and_run_collision(integrator='verlet', timestep=0.5, maxstep=10000, iprint=4, traj_file=traj_file_reaction, backfile=backfile)
+    reaction.sample_and_run_collision(integrator='verlet', timestep=0.5, maxstep=10000, iprint=4, pairs_to_stop=pairs_to_test, traj_file=traj_file_reaction, backfile=backfile)
     '''
 
 
+    '''
     pairs_to_test = {
     'capture_ON-C1': [((0, 5), 'LT', 1.5)],  
     'capture_ON-C2': [((1, 5), 'LT', 1.5)],  
@@ -972,24 +1031,20 @@ if __name__ == '__main__':
     'wfu': False
     }
 
-
-
-
-
     print("\nReaction of Vinyil + NO")
     print()
 
-    #reaction =  Collision(vinyl, NO, qchem=qcinput_vinyl_singlet)
-    reaction =  Collision(vinyl, NO, qchem=qcinput_Orca)
-    reaction.Specify_Collision_Sampling(Rini=8.0, bmax=4.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
+    reaction =  Collision(vinyl, NO, qchem=qcinput_vinyl_singlet)
+    #reaction =  Collision(vinyl, NO, qchem=qcinput_Orca)
+    reaction.Specify_Collision_Sampling(Rini=4.0, bmax=4.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
 
 
     backfile = "reaction_backup.xyz"
     traj_file_reaction = "traj_" + fname_vinyl + "+" + fname_NO + ".xyz"
 
 
-    reaction.sample_and_run_collision(integrator='verlet', timestep=0.5, maxstep=10000, pairs_to_stop=pairs_to_test, iprint=4, traj_file=traj_file_reaction, backfile=backfile)
-
+    reaction.sample_and_run_collision(integrator='predcorr', integrator_order=8, timestep=1.0, maxstep=10000, pairs_to_stop=pairs_to_test, iprint=4, traj_file=traj_file_reaction, backfile=backfile)
+    '''
 
 
 

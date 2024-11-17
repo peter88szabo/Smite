@@ -116,11 +116,12 @@ def add_rotational_momentum(angvel, mass, q, p):
         jx = 3*i
         jy = 3*i+1
         jz = 3*i+2
+        qx, qy, qz = q[jx], q[jy], q[jz]
 
         ang = np.array([
-                wy*q[jz] - wz*q[jy],
-                wz*q[jx] - wx*q[jz],
-                wx*q[jy] - wy*q[jx]
+                wy*qz - wz*qy,
+                wz*qx - wx*qz,
+                wx*qy - wy*qx
               ])
 
         #rotational momentum of the ith atom
