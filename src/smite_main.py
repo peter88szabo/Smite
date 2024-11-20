@@ -425,7 +425,7 @@ class Fragment(Molecule):
         
 
     @classmethod
-    def Atom_Init(cls, atoms):
+    def Atom_Init(cls, fname, atoms):
         if len(atoms) != 1:
             raise ValueError("ERROR: Atom_Init requires only a single atom. You must provide an array with a single element, for instance: ['Cl']")
 
@@ -434,7 +434,11 @@ class Fragment(Molecule):
 
         mass = get_mass_vector(atoms)
 
-        return cls(atoms=atoms, mass=mass, q_ini=q_ini, p_ini=p_ini)
+        this = cls(atoms=atoms, mass=mass, q_ini=q_ini, p_ini=p_ini)
+
+        this.fname = fname
+
+        return this 
 
     @classmethod
     def Diatom_Init(cls, fname, atoms, req=None, omega=None, alpha=None, De=None, rigid=False, random_rot=True, diatom='harmonic', nfix=0):
@@ -966,6 +970,18 @@ if __name__ == '__main__':
     'wfu': False
     }
 
+    qcinput_singlet_plus = {
+    'qchem': 'XTB',
+    'path': '/home/peter/orca_6_0_0/xtb',
+    'nproc': 4,
+    'functional': '',
+    'basis': '',
+    'charge': 1,
+    'multiplicity': 1,
+    'additional': '--acc 50 --iterations 1000 --spinpol --tblite',
+    'wfu': False
+    }
+
 
     qcinput_vinyl = {
     'qchem': 'XTB',
@@ -982,11 +998,11 @@ if __name__ == '__main__':
     qcinput_Orca = {
     'qchem': 'Orca',
     'path': '/home/peter/orca_6_0_0/orca',
-    'nproc': 8,
+    'nproc': 4,
     'functional': 'HF-3c',
     'basis': '',
     'charge': 0,
-    'multiplicity': 1,
+    'multiplicity': 2,
     'additional': '',
     'wfu': False
     }
@@ -1007,7 +1023,7 @@ if __name__ == '__main__':
     'qchem': 'Sparrow_bin',
     'path': '/home/peter/Programs/sparrow/install/bin/sparrow',
     'nproc': 4,
-    'functional': 'DFTB3',
+    'functional': 'PM6',
     'basis': '',
     'charge': 0,
     'multiplicity': 2,
@@ -1056,8 +1072,10 @@ if __name__ == '__main__':
     #vinyl = Fragment.Polyatom_Init(fname=fname_vinyl, qchem=qcinput_vinyl, xyz=xyz_vinyl, random_rot=True)
     #vinyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0)
 
-    clorine = Fragment.Atom_Init(atoms=['Cl'])
     fname_atom = 'Cl'
+    clorine = Fragment.Atom_Init(fname=fname_atom, atoms=['Cl'])
+
+    hydrogen = Fragment.Atom_Init(fname='H', atoms=['H'])
 
 
     req_O2 = 1.2
@@ -1083,7 +1101,7 @@ if __name__ == '__main__':
     #vinyl.print_mode_sampling()
     #print("--------- Vinyl radical DONE--------")
 
-
+    '''
     pairs_to_test = {
     'capture_gamma_1': [((2, 17), 'LT', 1.5)],  
     'capture_gamma_2': [((2, 18), 'LT', 1.5)],  
@@ -1093,11 +1111,12 @@ if __name__ == '__main__':
     'reaction_2': [((4, 5), 'GT', 9.0)],  
     # add more channels and pairs as needed
     }
+    '''
 
     pairs_to_test = {
-    'Habstr_1': [((0, 1), 'GT', 10.0), ((2, 1), 'GT', 9.0)],
-    'Habstr_2': [((0, 2), 'GT', 9.0), ((1, 2), 'GT', 9.0)],
-    'Nonreact': [((0, 1), 'LT', 2.5), ((0, 2), 'LT', 2.5), ((0, 3), 'GT', 10.0), ((0, 4), 'GT', 10.0)]
+    'Habstr_1': [((0, 1), 'GT', 10.0)],
+    'Habstr_2': [((0, 2), 'GT', 10.0)],
+    'Nonreact': [((0, 1), 'LT', 2.5), ((0, 2), 'LT', 2.5), ((0, 3), 'GT', 10.0)]
     # add more channels and pairs as needed
     }
 
@@ -1110,10 +1129,11 @@ if __name__ == '__main__':
     #reaction =  Collision(zzallyl, oxygen, qchem=qcinput) 
     #reaction =  Collision(zzallyl, NO, qchem=qcinput_singlet) 
     reaction =  Collision(water, NO, qchem=qcinput_doublet) 
-    reaction.Specify_Collision_Sampling(Rini=8.5, bmax=4.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
+    #reaction.Specify_Collision_Sampling(Rini=8.5, bmax=4.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
+    reaction.Specify_Collision_Sampling(Rini=9.0, bmax=3.0, bsampling=True, Ecoll=20.0, temp=300.0)
 
 
-    reaction.sample_and_run_collision(integrator='symplectic', integrator_order=4, timestep=1.0, maxstep=10000, iprint=1, pairs_to_stop=pairs_to_test)
+    reaction.sample_and_run_collision(integrator='leapfrog', integrator_order=4, timestep=1.0, maxstep=10000, iprint=1, pairs_to_stop=pairs_to_test)
 
     '''
     pairs_to_test = {
