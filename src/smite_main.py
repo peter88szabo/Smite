@@ -70,6 +70,7 @@ class Molecule:
         self.last_step  = last_step
         self.Rstop      = None 
         self.pairstop   = None
+        self.fname      = None
 
     def center_of_mass(self, q, mass):
         """
@@ -140,8 +141,8 @@ class Molecule:
                              startstep=0,
                              maxstep=100,
                              iprint=2,
-                             traj_file='trajectory.xyz',
-                             backfile="checkpoint.xyz",
+                             traj_file=None,
+                             backfile=None,
                              restart=False,
                              collision=False,
                              pairs_to_stop=None,
@@ -151,6 +152,12 @@ class Molecule:
                              thermo_temp=None):
 
         file_wf = "wavevfuntion" #or it should be given as class variable from self.fname
+
+        if traj_file is None:
+            traj_file = 'traj_' + self.fname + '.xyz' 
+
+        if backfile is None:
+            backfile = 'backup_for_restart_' + self.fname + '.xyz'
 
         b2a = 0.52917721092
 
@@ -288,7 +295,16 @@ class Molecule:
                     print("\n Propgation time has reached the maximum number of steps")
 
 
-    def restart_init(self, integrator='verlet', timestep=1.0, startstep=0, maxstep=100, iprint=2, traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False):
+    def restart_init(self, fname, integrator='verlet', timestep=1.0, startstep=0, maxstep=100, iprint=2, traj_file=None, backfile=None, restart=False):
+        self.fname = fname
+
+        if backfile is None:
+            raise ValueError('backup file name must be given in the input')
+
+        if traj_file is None:
+            traj_file = 'traj_' + self.fname + '.xyz'
+
+
         if restart:
             try:
                 last_step, self.atoms, self.q, self.p = parseCheckPoint(backfile)
@@ -370,7 +386,6 @@ class Fragment(Molecule):
         self.hessian      = None
         self.Lmat         = None #Normal mode to Cartesian transformator (eigvec of Hessian)
         self.freq         = None
-        self.fname        = None
         self.hessFile     = None
         self.vibsampling  = None
         self.rotsampling  = None
@@ -489,7 +504,7 @@ class Fragment(Molecule):
         this.nfix       = nfix
         
         if qchem['qchem'] == 'Orca':
-            self.delete_orca_tmp()
+            this.delete_orca_tmp()
 
         return this
 
@@ -555,8 +570,14 @@ class Fragment(Molecule):
 
 
     def sample_and_run_trajectory(self, integrator='verlet', integrator_order=4, timestep=1.0, startstep=0, maxstep=100, iprint=1,
-                                  traj_file='trajectory.xyz', backfile="checkpoint.xyz", Rstop=None, pairs_to_stop=None,
+                                  traj_file=None, backfile=None, Rstop=None, pairs_to_stop=None,
                                   thermostat=None, thermo_param=None, thermo_temp=None):
+
+        if traj_file is None:
+            traj_file = 'traj_' + self.fname + '.xyz' 
+        if backfile is None:
+            backfile = 'backup_for_restart_' + self.fname + '.xyz'
+
         #---------------------------------------------
         # Sample the internal motions of a fragment:
         #---------------------------------------------
@@ -804,7 +825,13 @@ class Collision(Molecule):
         return
 
     def sample_and_run_collision(self, integrator='verlet', integrator_order=4, timestep=1.0, startstep=0, maxstep=100, iprint=2,
-                                      traj_file='trajectory.xyz', backfile="checkpoint.xyz", restart=False, pairs_to_stop=None, Rstop=None, **kwargs):
+                                      traj_file=None, backfile=None, restart=False, pairs_to_stop=None, Rstop=None, **kwargs):
+
+        if traj_file is None:
+            traj_file = 'traj_of_reaction_' + self.fragment_A.fname + '_+_' + self.fragment_B.fname + '.xyz'
+
+        if backfile is None:
+            backfile = 'backup_for_restart_of_reaction_' + self.fragment_A.fname + '_+_' + self.fragment_B.fname + '.xyz'
 
         if pairs_to_stop is None and Rstop is None:
             raise ValueError("\nEither Rstop or pairs_to_stop must be given in the input")
@@ -897,7 +924,7 @@ if __name__ == '__main__':
     'charge': 0,
     'multiplicity': 2,
     'additional': '--acc 50 --iterations 1000 --spinpol --tblite',
-    'wfu': False
+    'wfu': False 
     }
 
     qcinput_vinyl = {
@@ -921,7 +948,7 @@ if __name__ == '__main__':
     'charge': 0,
     'multiplicity': 1,
     'additional': '',
-    'wfu': False
+    'wfu': True
     }
 
     qcinput_PySCF = {
@@ -942,10 +969,8 @@ if __name__ == '__main__':
     ngeom = 100
 
     fname_water = "water"
-    traj_file_water = "traj_" + fname_water + ".xyz"
 
     fname_diene = "diene"
-    traj_file_diene = "traj_" + fname_diene + ".xyz"
 
 
     fix_quantum = [(14, 0),
@@ -963,15 +988,13 @@ if __name__ == '__main__':
     #water  = Fragment.Polyatom_Init(fname=fname_water, qchem=qcinput, xyz=xyz_water, random_rot=random_rot)
     #water.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum_water)
 
-    diene  = Fragment.Polyatom_Init(fname=fname_diene, qchem=qcinput, xyz=xyz_diene, random_rot=True)
-    diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum, fix_temp=fix_temp)
-    diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
+    #diene  = Fragment.Polyatom_Init(fname=fname_diene, qchem=qcinput, xyz=xyz_diene, random_rot=True)
+    #diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum, fix_temp=fix_temp)
+    #diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
 
-    diene.sample_and_run_trajectory(integrator='leapfrog', integrator_order=4, timestep=1.0, maxstep=3000, iprint=1,
-                                  traj_file=traj_file_diene, Rstop=10.0, thermostat='berendsen', thermo_param=2.0, thermo_temp=500.0) 
+    #diene.sample_and_run_trajectory(integrator='leapfrog', integrator_order=4, timestep=1.0, maxstep=3000, iprint=1, Rstop=10.0) 
 
     fname_zzallyl = "ZZAllyl"
-    traj_file_diene = "traj_" + fname_zzallyl + ".xyz"
     #zzallyl  = Fragment.Polyatom_Init(fname=fname_zzallyl, qchem=qcinput, xyz=xyz_zzallyl, random_rot=True)
     #zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
 ##################    zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Temp', temp=300.0)
@@ -1003,9 +1026,9 @@ if __name__ == '__main__':
     #zzallyl.print_mode_sampling()
     #print("--------- ZZ-OH-Allyl Isoprenyl radical DONE--------")
 
-    #print("--------- Vinyl radical--------")
-    #vinyl.print_mode_sampling()
-    #print("--------- Vinyl radical DONE--------")
+    print("--------- Vinyl radical--------")
+    vinyl.print_mode_sampling()
+    print("--------- Vinyl radical DONE--------")
 
 
     '''
@@ -1029,11 +1052,9 @@ if __name__ == '__main__':
 
 
     backfile = "reaction_backup.xyz"
-    traj_file_reaction = "traj_" + fname_zzallyl + "+" + fname_oxygen + ".xyz"
 
 
     reaction.sample_and_run_collision(integrator='verlet', timestep=0.5, maxstep=10000, iprint=4, pairs_to_stop=pairs_to_test, traj_file=traj_file_reaction, backfile=backfile)
-    '''
     '''
 
     pairs_to_test = {
@@ -1065,13 +1086,7 @@ if __name__ == '__main__':
     #reaction =  Collision(vinyl, NO, qchem=qcinput_Orca)
     reaction.Specify_Collision_Sampling(Rini=6.0, bmax=4.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
 
-
-    backfile = "reaction_backup.xyz"
-    traj_file_reaction = "traj_" + fname_vinyl + "+" + fname_NO + ".xyz"
-
-
-    reaction.sample_and_run_collision(integrator='symplectic', integrator_order=4, timestep=1.0, maxstep=10000, pairs_to_stop=pairs_to_test, iprint=1, traj_file=traj_file_reaction, backfile=backfile)
-    '''
+    reaction.sample_and_run_collision(integrator='symplectic', integrator_order=4, timestep=1.0, maxstep=10000, pairs_to_stop=pairs_to_test, iprint=1)
 
 
    
