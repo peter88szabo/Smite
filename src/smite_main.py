@@ -1,6 +1,7 @@
 import numpy as np
 import os
 import math
+import shutil
 
 from utils.cenmass                import cenmass
 from utils.euler                  import euler_rot          
@@ -104,9 +105,20 @@ class Molecule:
 
     ##wave function file should be generated automatically based on the name of molecule
     #as it given in the qcinput dictionary
-    def get_energy(self):
-        file_wf = "wavevfuntion" #or it should be given as class variable from self.fname
-        return Energy(self.qchem, file_wf, self.q, self.p, self.atoms, self.wmass)
+    def get_energy(self, file_wf=None):
+        check = False
+        if file_wf is None and self.qchem['wfu']:
+            file_wf = 'garbage_wavefunc_file.txt'
+            check = True
+
+        #Everything else here (other than this single line)
+        #is to prevent unnecessary wave function printing when wfu is switched on
+        T, V, E = Energy(self.qchem, file_wf, self.q, self.p, self.atoms, self.wmass)
+
+        if check and os.path.exists(file_wf) and self.qchem['wfu']:
+            os.remove(file_wf)
+            
+        return T, V, E 
 
     def stormer_single_step(self, dt):
         self.q, self.p = stormer_verlet(self.qchem, dt, self.wmass, self.q, self.p, self.atoms)
@@ -151,7 +163,7 @@ class Molecule:
                              thermo_param=None,
                              thermo_temp=None):
 
-        file_wf = "wavevfuntion" #or it should be given as class variable from self.fname
+        wf_dir = "wavefunction_along_trajectory"
 
         if traj_file is None:
             traj_file = 'traj_' + self.fname + '.xyz' 
@@ -170,11 +182,21 @@ class Molecule:
 
         #--------------------------------------------------------------------------------------
         if not restart:
-            print("\n*************************************************************************")
+            print("\n********************************************************************************************")
             if os.path.exists(traj_file):
                 os.remove(traj_file)
-                print(f"{traj_file} already exisits, it has been deleted to create a new one.")
-            print("***************************************************************************")
+                print(f"{traj_file} already exisits, it has been deleted to create a new one")
+
+            if self.qchem['wfu'] and os.path.exists(wf_dir) and os.path.isdir(wf_dir):
+                shutil.rmtree(wf_dir)
+                os.makedirs(wf_dir)
+                print(f"\n{wf_dir} already exisits, it has been deleted to create a new one")
+            elif self.qchem['wfu'] and not os.path.exists(wf_dir):
+                os.makedirs(wf_dir)
+                print(f"\n{wf_dir} created")
+
+
+            print("********************************************************************************************\n")
         #--------------------------------------------------------------------------------------
 
 
@@ -208,7 +230,9 @@ class Molecule:
 
                 #-----------------------------------------------------------------------------
                 if (iprint > 0 and istep % iprint == 0 and istep > startstep) or istep == 0:
-                    T, V, E = self.get_energy() 
+
+                    file_wf = os.path.join(wf_dir, 'wavefunc_' + self.fname + '_step_' + str(istep) + '.molden')
+                    T, V, E = self.get_energy(file_wf=file_wf) 
 
                     act_temp = self.traj_temperature()
 
@@ -922,9 +946,9 @@ if __name__ == '__main__':
     'functional': '',
     'basis': '',
     'charge': 0,
-    'multiplicity': 2,
+    'multiplicity': 1,
     'additional': '--acc 50 --iterations 1000 --spinpol --tblite',
-    'wfu': False 
+    'wfu': True 
     }
 
     qcinput_vinyl = {
@@ -942,13 +966,13 @@ if __name__ == '__main__':
     qcinput_Orca = {
     'qchem': 'Orca',
     'path': '/home/peter/orca_6_0_0/orca',
-    'nproc': 4,
+    'nproc': 8,
     'functional': 'HF-3c',
     'basis': '',
     'charge': 0,
     'multiplicity': 1,
     'additional': '',
-    'wfu': True
+    'wfu': False
     }
 
     qcinput_PySCF = {
@@ -960,7 +984,7 @@ if __name__ == '__main__':
     'charge': 0,
     'multiplicity': 1,
     'additional': '',
-    'wfu': False
+    'wfu': True
     }
 
 
@@ -988,11 +1012,11 @@ if __name__ == '__main__':
     #water  = Fragment.Polyatom_Init(fname=fname_water, qchem=qcinput, xyz=xyz_water, random_rot=random_rot)
     #water.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum_water)
 
-    #diene  = Fragment.Polyatom_Init(fname=fname_diene, qchem=qcinput, xyz=xyz_diene, random_rot=True)
-    #diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum, fix_temp=fix_temp)
-    #diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
+    diene  = Fragment.Polyatom_Init(fname=fname_diene, qchem=qcinput_PySCF, xyz=xyz_diene, random_rot=True)
+   #diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum, fix_temp=fix_temp)
+    diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
 
-    #diene.sample_and_run_trajectory(integrator='leapfrog', integrator_order=4, timestep=1.0, maxstep=3000, iprint=1, Rstop=10.0) 
+    diene.sample_and_run_trajectory(integrator='leapfrog', integrator_order=4, timestep=0.5, maxstep=3000, iprint=1, Rstop=10.0) 
 
     fname_zzallyl = "ZZAllyl"
     #zzallyl  = Fragment.Polyatom_Init(fname=fname_zzallyl, qchem=qcinput, xyz=xyz_zzallyl, random_rot=True)
@@ -1001,8 +1025,8 @@ if __name__ == '__main__':
     #zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=5)
 
     fname_vinyl = "vinyl"
-    vinyl = Fragment.Polyatom_Init(fname=fname_vinyl, qchem=qcinput_vinyl, xyz=xyz_vinyl, random_rot=True)
-    vinyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0)
+    #vinyl = Fragment.Polyatom_Init(fname=fname_vinyl, qchem=qcinput_vinyl, xyz=xyz_vinyl, random_rot=True)
+    #vinyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0)
 
     clorine = Fragment.Atom_Init(atoms=['Cl'])
     fname_atom = 'Cl'
@@ -1026,9 +1050,9 @@ if __name__ == '__main__':
     #zzallyl.print_mode_sampling()
     #print("--------- ZZ-OH-Allyl Isoprenyl radical DONE--------")
 
-    print("--------- Vinyl radical--------")
-    vinyl.print_mode_sampling()
-    print("--------- Vinyl radical DONE--------")
+    #print("--------- Vinyl radical--------")
+    #vinyl.print_mode_sampling()
+    #print("--------- Vinyl radical DONE--------")
 
 
     '''
@@ -1057,6 +1081,7 @@ if __name__ == '__main__':
     reaction.sample_and_run_collision(integrator='verlet', timestep=0.5, maxstep=10000, iprint=4, pairs_to_stop=pairs_to_test, traj_file=traj_file_reaction, backfile=backfile)
     '''
 
+    '''
     pairs_to_test = {
     'capture_ON-C1': [((0, 5), 'LT', 1.5)],  
     'capture_ON-C2': [((1, 5), 'LT', 1.5)],  
@@ -1087,6 +1112,7 @@ if __name__ == '__main__':
     reaction.Specify_Collision_Sampling(Rini=6.0, bmax=4.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
 
     reaction.sample_and_run_collision(integrator='symplectic', integrator_order=4, timestep=1.0, maxstep=10000, pairs_to_stop=pairs_to_test, iprint=1)
+    '''
 
 
    
