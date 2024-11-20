@@ -231,8 +231,11 @@ class Molecule:
                 #-----------------------------------------------------------------------------
                 if (iprint > 0 and istep % iprint == 0 and istep > startstep) or istep == 0:
 
-                    file_wf = os.path.join(wf_dir, 'wavefunc_' + self.fname + '_step_' + str(istep) + '.molden')
-                    T, V, E = self.get_energy(file_wf=file_wf) 
+                    if self.qchem['wfu']:
+                        file_wf = os.path.join(wf_dir, 'wavefunc_' + self.fname + '_step_' + str(istep) + '.molden')
+                        T, V, E = self.get_energy(file_wf=file_wf) 
+                    else:
+                        T, V, E = self.get_energy() 
 
                     act_temp = self.traj_temperature()
 
@@ -936,10 +939,22 @@ if __name__ == '__main__':
     '''
 
 
-    seed = 11269102
+    seed = 12949102
     random.seed(seed)
 
-    qcinput = {
+    qcinput_doublet = {
+    'qchem': 'XTB',
+    'path': '/home/peter/orca_6_0_0/xtb',
+    'nproc': 4,
+    'functional': '',
+    'basis': '',
+    'charge': 0,
+    'multiplicity': 2,
+    'additional': '--acc 50 --iterations 1000 --spinpol --tblite',
+    'wfu': False 
+    }
+
+    qcinput_singlet = {
     'qchem': 'XTB',
     'path': '/home/peter/orca_6_0_0/xtb',
     'nproc': 4,
@@ -948,8 +963,9 @@ if __name__ == '__main__':
     'charge': 0,
     'multiplicity': 1,
     'additional': '--acc 50 --iterations 1000 --spinpol --tblite',
-    'wfu': True 
+    'wfu': False
     }
+
 
     qcinput_vinyl = {
     'qchem': 'XTB',
@@ -986,6 +1002,18 @@ if __name__ == '__main__':
     'additional': '',
     'wfu': True
     }
+    
+    qcinput_Sparrow_bin = {
+    'qchem': 'Sparrow_bin',
+    'path': '/home/peter/Programs/sparrow/install/bin/sparrow',
+    'nproc': 4,
+    'functional': 'DFTB3',
+    'basis': '',
+    'charge': 0,
+    'multiplicity': 2,
+    'additional': '-I 200 --density_rmsd_criterion 1e-3 --self_consistence_criterion 1e-5',
+    'wfu': False
+    }
 
 
     rigid = False
@@ -1009,20 +1037,20 @@ if __name__ == '__main__':
 
     fix_quantum_water = [(0, 6)]
 
-    #water  = Fragment.Polyatom_Init(fname=fname_water, qchem=qcinput, xyz=xyz_water, random_rot=random_rot)
-    #water.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum_water)
+    water  = Fragment.Polyatom_Init(fname=fname_water, qchem=qcinput_singlet, xyz=xyz_water, random_rot=random_rot)
+    water.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=3)
 
-    diene  = Fragment.Polyatom_Init(fname=fname_diene, qchem=qcinput_PySCF, xyz=xyz_diene, random_rot=True)
+    #diene  = Fragment.Polyatom_Init(fname=fname_diene, qchem=qcinput_Sparrow_bin, xyz=xyz_diene, random_rot=True)
    #diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum, fix_temp=fix_temp)
-    diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
+    #diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
 
-    diene.sample_and_run_trajectory(integrator='leapfrog', integrator_order=4, timestep=0.5, maxstep=3000, iprint=1, Rstop=10.0) 
+    #diene.sample_and_run_trajectory(integrator='leapfrog', integrator_order=4, timestep=0.5, maxstep=3000, iprint=1, Rstop=10.0) 
 
-    fname_zzallyl = "ZZAllyl"
-    #zzallyl  = Fragment.Polyatom_Init(fname=fname_zzallyl, qchem=qcinput, xyz=xyz_zzallyl, random_rot=True)
+    #fname_zzallyl = "ZZAllyl"
+    #zzallyl  = Fragment.Polyatom_Init(fname=fname_zzallyl, qchem=qcinput_doublet, xyz=xyz_zzallyl, random_rot=True)
     #zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
 ##################    zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Temp', temp=300.0)
-    #zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=5)
+    #zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=20)
 
     fname_vinyl = "vinyl"
     #vinyl = Fragment.Polyatom_Init(fname=fname_vinyl, qchem=qcinput_vinyl, xyz=xyz_vinyl, random_rot=True)
@@ -1041,10 +1069,11 @@ if __name__ == '__main__':
     fname_NO = 'NO'
 
     oxygen = Fragment.Diatom_Init(fname=fname_oxygen, atoms=['O','O'], req=req_O2, omega=omega_O2, random_rot=True, diatom='harmonic')
-    oxygen.Specify_Mode_Sampling(init_rot_type='Jfix', nvib=0, jrot=0)
+    #oxygen.Specify_Mode_Sampling(init_rot_type='Jfix', nvib=0, jrot=0)
+    oxygen.Specify_Mode_Sampling(init_rot_type='Temp', nvib=0, temp=300.0)
 
     NO = Fragment.Diatom_Init(fname=fname_NO, atoms=['N','O'], req=req_NO, omega=omega_NO, random_rot=True, diatom='harmonic')
-    NO.Specify_Mode_Sampling(init_rot_type='Jfix', nvib=0, jrot=0)
+    NO.Specify_Mode_Sampling(init_rot_type='Jfix', nvib=0, jrot=10)
 
     #print("--------- ZZ-OH-Allyl Isoprenyl radical--------")
     #zzallyl.print_mode_sampling()
@@ -1055,7 +1084,6 @@ if __name__ == '__main__':
     #print("--------- Vinyl radical DONE--------")
 
 
-    '''
     pairs_to_test = {
     'capture_gamma_1': [((2, 17), 'LT', 1.5)],  
     'capture_gamma_2': [((2, 18), 'LT', 1.5)],  
@@ -1066,20 +1094,26 @@ if __name__ == '__main__':
     # add more channels and pairs as needed
     }
 
+    pairs_to_test = {
+    'Habstr_1': [((0, 1), 'GT', 10.0), ((2, 1), 'GT', 9.0)],
+    'Habstr_2': [((0, 2), 'GT', 9.0), ((1, 2), 'GT', 9.0)],
+    'Nonreact': [((0, 1), 'LT', 2.5), ((0, 2), 'LT', 2.5), ((0, 3), 'GT', 10.0), ((0, 4), 'GT', 10.0)]
+    # add more channels and pairs as needed
+    }
+
+
     
     print("\nReaction of ZZ-OH-allyl + O2")
     print()
 
 
-    reaction =  Collision(zzallyl, oxygen, qchem=qcinput) 
-    reaction.Specify_Collision_Sampling(Rini=4.5, bmax=5.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
+    #reaction =  Collision(zzallyl, oxygen, qchem=qcinput) 
+    #reaction =  Collision(zzallyl, NO, qchem=qcinput_singlet) 
+    reaction =  Collision(water, NO, qchem=qcinput_doublet) 
+    reaction.Specify_Collision_Sampling(Rini=8.5, bmax=4.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
 
 
-    backfile = "reaction_backup.xyz"
-
-
-    reaction.sample_and_run_collision(integrator='verlet', timestep=0.5, maxstep=10000, iprint=4, pairs_to_stop=pairs_to_test, traj_file=traj_file_reaction, backfile=backfile)
-    '''
+    reaction.sample_and_run_collision(integrator='symplectic', integrator_order=4, timestep=1.0, maxstep=10000, iprint=1, pairs_to_stop=pairs_to_test)
 
     '''
     pairs_to_test = {
@@ -1087,7 +1121,7 @@ if __name__ == '__main__':
     'capture_ON-C2': [((1, 5), 'LT', 1.5)],  
     'capture_NO-C1': [((0, 6), 'LT', 1.5)],  
     'capture_NO-C2': [((1, 6), 'LT', 1.5)],  
-    'reaction_1': [((0, 5), 'GT', 10.0), ((0, 6), 'GT', 10.0)],  
+    'reaction_1': [((0, 5), 'GT', 67.0), ((0, 6), 'GT', 10.0)],  
     # add more channels and pairs as needed
     }
 

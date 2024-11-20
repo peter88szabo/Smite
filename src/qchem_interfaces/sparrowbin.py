@@ -2,6 +2,7 @@ import subprocess
 import numpy as np
 import os
 from io import StringIO
+import shutil
 
 
 def Sparrowbin_Hessian(q, atoms, qcinput):
@@ -62,12 +63,16 @@ def Sparrowbin_Energy(file_wf, q, atoms, qcinput):
 
     arg = "-D energ calc" #-D [ --description ] arg      ||sets a calculation description which will appear in the output
                           #dummy argument (wihtout it problematic)
-    if wfu == True:
+    if wfu:
        arg = "-W"
 
 
     result = callSparrowbin(inputfile, path, charge, multiplicity, method, arg, natom)
     ene = result["Energy"]
+
+    if wfu:
+        sparrow_wf_file = 'wavefunction.molden.input' 
+        shutil.move(sparrow_wf_file, file_wf) 
 
     return ene 
 
