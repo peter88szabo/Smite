@@ -72,6 +72,9 @@ class Molecule:
         self.Rstop      = None 
         self.pairstop   = None
         self.fname      = None
+        self.vref       = 0.0  #the equilibrium pot energy of fragment 
+        self.vini       = None #the initial (sampled) pot energy which is likely out of equilibrium
+        self.tini       = None
 
     def center_of_mass(self, q, mass):
         """
@@ -214,9 +217,6 @@ class Molecule:
         if collision and self.Rstop is not None:
             if self.Rstop < self.Rini:
                 raise ValueError("Rstop must be larger than Rini")
-        else:
-            Tini, Vini, Eini = self.get_energy()
-            
 
         if integrator == 'predcorr':
             propag = PredCorr(integrator_order, len(self.q))
@@ -258,7 +258,7 @@ class Molecule:
                             tstop = test_to_stop_general(q=self.q, tol=self.Rstop)
                             channel = 'Not Specified'
 
-                        print(f"step: {istep:<10d} t[fs]: {istep*dt/c6:<12.1f}  V[Eh]: {V:<16.6f} E[Eh]: {E:<16.6f} dE[kJ]: {dE*c7:16.3f}    T[K]: {act_temp:<10.2f} Rcom[A]: {Rcom_actual*b2a:8.2f}")
+                        print(f"step: {istep:<10d} t[fs]: {istep*dt/c6:<12.1f} (V-V0)[Eh]: {(V-self.vref):<16.6f} (E-V0)[Eh]: {(E-self.vref):<16.6f} dE[kJ]: {dE*c7:16.3f}    T[K]: {act_temp:<10.2f} Rcom[A]: {Rcom_actual*b2a:8.2f}")
 
                     else: #if not collision (just unimolecular dynamics) then we can ran the test anytime
                         print(f"step: {istep:<10d} t[fs]: {istep*dt/c6:<12.2f}  V[Eh]: {V:<16.6f} E[Eh]: {E:<16.6f} dE[kJ]: {dE*c7:16.3f}     T[K]: {act_temp:<10.2f}")
