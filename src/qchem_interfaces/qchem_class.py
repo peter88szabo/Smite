@@ -19,9 +19,11 @@ class Calculator:
         self.multiplicity = kwargs.get('multiplicity', 1)
         self.wfu = kwargs.get('wfu', False)
         self.nproc = kwargs.get('nproc', 1)
+        self.mem = kwargs.get('mem', 2000)
         self.path = kwargs.get('path', None)
         self.basis = kwargs.get('basis', "sto-3g")
         self.additional = kwargs.get('additional', None)
+        self.details = kwargs.get('details', None)
 
         # Use match to set method based on the chosen qchem
         match self.qchem:

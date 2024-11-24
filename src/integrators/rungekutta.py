@@ -5,34 +5,29 @@ def rk4(qcinput, dt, wmass, q, p, atoms):
     """
     Runge-Kutta 4 integrator for conservative systems.
     """
-    qold = np.copy(q)
-    pold = np.copy(p)
     
     # Step 1
     f1 = force_calc(qcinput, q, atoms)
-    g1 = p / wmass
+    v1 = p / wmass
     
     # Step 2
-    q2 = qold + 0.5 * dt * g1
-    p2 = pold + 0.5 * dt * f1
+    q2 = q + 0.5 * dt * v1
     f2 = force_calc(qcinput, q2, atoms)
-    g2 = p2 / wmass
+    v2 = (p + 0.5 * dt * f1) / wmass
     
     # Step 3
-    q3 = qold + 0.5 * dt * g2
-    p3 = pold + 0.5 * dt * f2
+    q3 = q + 0.5 * dt * v2
     f3 = force_calc(qcinput, q3, atoms)
-    g3 = p3 / wmass
+    v3 = (p + 0.5 * dt * f2) / wmass
     
     # Step 4
-    q4 = qold + dt * g3
-    p4 = pold + dt * f3
+    q4 = q + dt * v3
     f4 = force_calc(qcinput, q4, atoms)
-    g4 = p4 / wmass
+    v4 = (p + dt * f3) / wmass
     
     # Final update of q and p
-    q = qold + dt * (g1 + 2.0 * (g2 + g3) + g4) / 6.0
-    p = pold + dt * (f1 + 2.0 * (f2 + f3) + f4) / 6.0
+    q += dt * (v1 + 2.0 * (v2 + v3) + v4) / 6.0
+    p += dt * (f1 + 2.0 * (f2 + f3) + f4) / 6.0
 
-    return q, p
+    return (q, p)
 

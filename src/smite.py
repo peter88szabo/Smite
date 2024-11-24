@@ -2,6 +2,7 @@ import numpy as np
 import os
 import math
 import shutil
+import random
 
 from utils.cenmass                import cenmass
 from utils.euler                  import euler_rot          
@@ -37,6 +38,7 @@ from integrators.symplectic       import Symplectic
 from integrators.sprk             import SPRK
 from integrators.predcorr         import PredCorr 
 from integrators.gradient         import Energy
+
 from thermostats.randmomentum     import random_initialize_momenta
 from thermostats.berendsen        import thermo_berendsen 
 from thermostats.andersen         import thermo_andersen 
@@ -75,6 +77,25 @@ class Molecule:
         self.vref       = 0.0  #the equilibrium pot energy of fragment 
         self.vini       = None #the initial (sampled) pot energy which is likely out of equilibrium
         self.tini       = None
+        self.vsave      = []
+        self.dsave      = []
+
+    def save_velocity_and_distance_matrix(self):
+        #mass weighted velcity u = M^1/2 * v
+        #each element of the list is mass weigthed velocity vector corresponding to a timestep
+        self.vsave.append(self.p / np.sqrt(self.wmass)) 
+
+        qxyz = np.reshape(self.q, (-1, 3))
+
+        dist_matrix = np.linalg.norm(qxyz[:, np.newaxis, :] - qxyz[np.newaxis, :, :], axis=-1)
+
+        #each element of the list is the distance matrix corresponding to a timestep 
+        self.dsave.append(dist_matrix)
+
+
+    def vibrational_spectrum(self, **kwargs):
+        self.vsave 
+        return
 
     def center_of_mass(self, q, mass):
         """
@@ -146,6 +167,7 @@ class Molecule:
 
     def thermo_berendsen(self, tau, dt, Ttarg):
         self.p = thermo_berendsen(self.nfix, self.p, self.wmass, dt, tau, Ttarg)
+
     def thermo_andersen(self, prob, dt, Ttarg):
         self.p = thermo_andersen(self.nfix, self.p, self.wmass, dt, prob, Ttarg)
 
@@ -164,7 +186,8 @@ class Molecule:
                              Rstop=None,
                              thermostat=None,
                              thermo_param=None,
-                             thermo_temp=None):
+                             thermo_temp=None,
+                             spectrum=False):
 
         wf_dir = "wavefunction_along_trajectory"
 
@@ -242,6 +265,7 @@ class Molecule:
                     dE = E - E0
 
 
+                    #here we sould print temperature too...
                     print_trajectory(file_trj, self.atoms, self.q, self.p, V, dE, dt, istep)
 
 
@@ -309,7 +333,10 @@ class Molecule:
                     self.thermo_berendsen(tau, dt, thermo_temp)
                 if thermostat == 'andersen':
                     self.thermo_andersen(thermo_param, dt, thermo_temp)
-            
+
+                if spectrum and thermostat is None:
+                    self.save_velocity_and_distance_matrix()
+
 
                 #--------------------------------------------------------------------------
                 #Backup:
@@ -602,7 +629,7 @@ class Fragment(Molecule):
 
     def sample_and_run_trajectory(self, integrator='verlet', integrator_order=4, timestep=1.0, startstep=0, maxstep=100, iprint=1,
                                   traj_file=None, backfile=None, Rstop=None, pairs_to_stop=None,
-                                  thermostat=None, thermo_param=None, thermo_temp=None):
+                                  thermostat=None, thermo_param=None, thermo_temp=None, spectrum=False):
 
         if traj_file is None:
             traj_file = 'traj_' + self.fname + '.xyz' 
@@ -628,7 +655,7 @@ class Fragment(Molecule):
 
         self.run_trajectory(integrator=integrator, integrator_order=integrator_order, timestep=timestep, startstep=startstep, maxstep=maxstep,
                             iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=False,
-                            Rstop=Rstop, pairs_to_stop=pairs_to_stop, thermostat=thermostat, thermo_param=thermo_param, thermo_temp=thermo_temp)
+                            Rstop=Rstop, pairs_to_stop=pairs_to_stop, thermostat=thermostat, thermo_param=thermo_param, thermo_temp=thermo_temp, spectrum=spectrum)
 
 
     def print_mode_sampling(self):
@@ -856,7 +883,7 @@ class Collision(Molecule):
         return
 
     def sample_and_run_collision(self, integrator='verlet', integrator_order=4, timestep=1.0, startstep=0, maxstep=100, iprint=2,
-                                      traj_file=None, backfile=None, restart=False, pairs_to_stop=None, Rstop=None, **kwargs):
+                                      traj_file=None, backfile=None, restart=False, pairs_to_stop=None, Rstop=None, spectrum=False, **kwargs):
 
         if traj_file is None:
             traj_file = 'traj_of_reaction_' + self.fragment_A.fname + '_+_' + self.fragment_B.fname + '.xyz'
@@ -871,306 +898,5 @@ class Collision(Molecule):
         self.Sample_Bimolecular_Reactants(**kwargs)
 
         self.run_trajectory(integrator=integrator, integrator_order=integrator_order, timestep=timestep, startstep=startstep, maxstep=maxstep,
-                            iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=restart, collision=True, Rstop=Rstop, pairs_to_stop=pairs_to_stop)
-
-
-        
-
-if __name__ == '__main__':
-    import random
-
-    c1   = 0.52917721092         # [bohr]     * c1 = [Ansgtrom]
-    c3   = 1838.6836605e0        # [g/mol]    * c3 = [electron mass unit]
-    c5   = 219474.e0            # [Hartree]  * c5 = [cm-1]
-    c6   = 41.341105             # [fs]       * c6 = [time in au]
-    c7   = 2625.5                # [Hartree]  * c7 = [kJ/mol]
-    c9   = 1.0e8/c1             # [freqcm-1] *c9=[freq(bohr^(-1))]
-    c10  = 137.035999074        # [speed of light in atomic unit]
-    Rgas = 8.3144598/1000.0/c7 #Hartree/K
-
-    xyz_water = '''
-      O    -0.011100  0.0000  -0.00788
-      H     0.007500  0.0000   0.95111
-      H     0.899200  0.0000  -0.30990
-       '''
-
-    #IRC endpoint of openchain cis-1,3,5 triene
-    xyz_diene = '''
-      C      -1.185385      1.500364     -0.174799
-      C       0.057100      1.525641      0.290486
-      C       1.182421      0.671307     -0.090281
-      C       1.182420     -0.671306     -0.090282
-      C       0.057100     -1.525640      0.290485
-      C      -1.185388     -1.500364     -0.174796
-      H       0.285347      2.226153      1.090336
-      H       2.144030      1.164815     -0.199258
-      H       2.144029     -1.164815     -0.199261
-      H       0.285350     -2.226154      1.090332
-      H      -1.972016     -2.076478      0.294389
-      H      -1.462109     -0.924082     -1.042658
-      H      -1.972017      2.076476      0.294382
-      H      -1.462101      0.924083     -1.042665
-     '''
-
-     #ZZAllyl-peroxy+O2_Case1 M062X avtz optim Con 21 (11 csak a futtatos jelolesben 21)
-    xyz_zzallyl = '''
-    C   -0.19595538763398      0.07192231509414      0.00714857985445
-    C   -0.01703579534250     -0.10344222305327      1.49976587011423
-    C   -1.00831293517504     -0.74304790940588      2.21484017141187
-    C   -1.09565313995228     -0.96572164058650      3.69139746432409
-    O   -2.44905662107855     -1.09778426038872      4.10589699809888
-    O   -3.03738052053937      0.19479040763344      4.06761535894273
-    C   1.14919758827461      0.41511797958774      2.03274034295381
-    O   1.44878216770210      0.30476609400103      3.35160340084751
-    H   -1.82826168270363     -1.17741133496109      1.65145938615843
-    H   1.87669555170293      0.91631236085033      1.40830140902315
-    H   0.76154446389898      0.10310849679981     -0.51109606581980
-    H   -0.77393280198763     -0.75201110449544     -0.40695658995199
-    H   -0.72775230388759      0.99760660592287     -0.21471742835545
-    H   -0.61505142152353     -0.17733195303782      4.26524823267036
-    H   -0.65062609284075     -1.92286967316247      3.98246076165767
-    H   2.29766286152308      0.71228566068994      3.53361144883480
-    H   -3.35772393043684      0.25312017851188      3.15850065923520
-     '''
-
-    #vinyl radical optimized by XTB-spinpol
-    xyz_vinyl = '''
-    C           -0.06765881401168        0.36069437750287        0.21726087063540
-    C           -0.02989301947210        0.05415854223373        1.47236819314274
-    H            0.88885859725297        0.01810805651872        2.06187426829113
-    H           -0.92319008305886       -0.19134188210751        2.02827103745251
-    H            0.58952031928966        0.63203190585219       -0.57444136952178
-    '''
-
-
-    seed = 12949102
-    random.seed(seed)
-
-    qcinput_doublet = {
-    'qchem': 'XTB',
-    'path': '/home/peter/orca_6_0_0/xtb',
-    'nproc': 4,
-    'functional': '',
-    'basis': '',
-    'charge': 0,
-    'multiplicity': 2,
-    'additional': '--acc 50 --iterations 1000 --spinpol --tblite',
-    'wfu': False 
-    }
-
-    qcinput_singlet = {
-    'qchem': 'XTB',
-    'path': '/home/peter/orca_6_0_0/xtb',
-    'nproc': 4,
-    'functional': '',
-    'basis': '',
-    'charge': 0,
-    'multiplicity': 1,
-    'additional': '--acc 50 --iterations 1000 --spinpol --tblite',
-    'wfu': False
-    }
-
-    qcinput_singlet_plus = {
-    'qchem': 'XTB',
-    'path': '/home/peter/orca_6_0_0/xtb',
-    'nproc': 4,
-    'functional': '',
-    'basis': '',
-    'charge': 1,
-    'multiplicity': 1,
-    'additional': '--acc 50 --iterations 1000 --spinpol --tblite',
-    'wfu': False
-    }
-
-
-    qcinput_vinyl = {
-    'qchem': 'XTB',
-    'path': '/home/peter/orca_6_0_0/xtb',
-    'nproc': 8,
-    'functional': '',
-    'basis': '',
-    'charge': 0,
-    'multiplicity': 2,
-    'additional': '--acc 50 --iterations 1000 --spinpol --tblite',
-    'wfu': False
-    }
-
-    qcinput_Orca = {
-    'qchem': 'Orca',
-    'path': '/home/peter/orca_6_0_0/orca',
-    'nproc': 4,
-    'functional': 'HF-3c',
-    'basis': '',
-    'charge': 0,
-    'multiplicity': 2,
-    'additional': '',
-    'wfu': False
-    }
-
-    qcinput_PySCF = {
-    'qchem': 'PySCF',
-    'path': '',
-    'nproc': 4,
-    'functional': 'PBE',
-    'basis': 'sto-3g',
-    'charge': 0,
-    'multiplicity': 1,
-    'additional': '',
-    'wfu': True
-    }
-    
-    qcinput_Sparrow_bin = {
-    'qchem': 'Sparrow_bin',
-    'path': '/home/peter/Programs/sparrow/install/bin/sparrow',
-    'nproc': 4,
-    'functional': 'PM6',
-    'basis': '',
-    'charge': 0,
-    'multiplicity': 2,
-    'additional': '-I 200 --density_rmsd_criterion 1e-3 --self_consistence_criterion 1e-5',
-    'wfu': False
-    }
-
-
-    rigid = False
-    random_rot = False #True
-    ngeom = 100
-
-    fname_water = "water"
-
-    fname_diene = "diene"
-
-
-    fix_quantum = [(14, 0),
-                   (15, 0)]
-
-    fix_energy  = [(0, 0.0),
-                   (1, 0.0),
-                   (2, 0.0)]
-
-    fix_temp    = [(5, 330.0),
-                   (6, 430.0)]
-
-    fix_quantum_water = [(0, 6)]
-
-    water  = Fragment.Polyatom_Init(fname=fname_water, qchem=qcinput_singlet, xyz=xyz_water, random_rot=random_rot)
-    water.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=3)
-
-    #diene  = Fragment.Polyatom_Init(fname=fname_diene, qchem=qcinput_Sparrow_bin, xyz=xyz_diene, random_rot=True)
-   #diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum, fix_temp=fix_temp)
-    #diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
-
-    #diene.sample_and_run_trajectory(integrator='leapfrog', integrator_order=4, timestep=0.5, maxstep=3000, iprint=1, Rstop=10.0) 
-
-    #fname_zzallyl = "ZZAllyl"
-    #zzallyl  = Fragment.Polyatom_Init(fname=fname_zzallyl, qchem=qcinput_doublet, xyz=xyz_zzallyl, random_rot=True)
-    #zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
-##################    zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Temp', temp=300.0)
-    #zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=20)
-
-    fname_vinyl = "vinyl"
-    #vinyl = Fragment.Polyatom_Init(fname=fname_vinyl, qchem=qcinput_vinyl, xyz=xyz_vinyl, random_rot=True)
-    #vinyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0)
-
-    fname_atom = 'Cl'
-    clorine = Fragment.Atom_Init(fname=fname_atom, atoms=['Cl'])
-
-    hydrogen = Fragment.Atom_Init(fname='H', atoms=['H'])
-
-
-    req_O2 = 1.2
-    omega_O2 = 1580.0
-    fname_oxygen = 'O2'
-
-    req_NO = 1.1557 #ground state as Pi-doublet from XTB spinpol
-    omega_NO = 1948.36
-    fname_NO = 'NO'
-
-    oxygen = Fragment.Diatom_Init(fname=fname_oxygen, atoms=['O','O'], req=req_O2, omega=omega_O2, random_rot=True, diatom='harmonic')
-    #oxygen.Specify_Mode_Sampling(init_rot_type='Jfix', nvib=0, jrot=0)
-    oxygen.Specify_Mode_Sampling(init_rot_type='Temp', nvib=0, temp=300.0)
-
-    NO = Fragment.Diatom_Init(fname=fname_NO, atoms=['N','O'], req=req_NO, omega=omega_NO, random_rot=True, diatom='harmonic')
-    NO.Specify_Mode_Sampling(init_rot_type='Jfix', nvib=0, jrot=10)
-
-    #print("--------- ZZ-OH-Allyl Isoprenyl radical--------")
-    #zzallyl.print_mode_sampling()
-    #print("--------- ZZ-OH-Allyl Isoprenyl radical DONE--------")
-
-    #print("--------- Vinyl radical--------")
-    #vinyl.print_mode_sampling()
-    #print("--------- Vinyl radical DONE--------")
-
-    '''
-    pairs_to_test = {
-    'capture_gamma_1': [((2, 17), 'LT', 1.5)],  
-    'capture_gamma_2': [((2, 18), 'LT', 1.5)],  
-    'capture_alpha_1': [((6, 17), 'LT', 1.5)],  
-    'capture_alpha_2': [((6, 18), 'LT', 1.5)],  
-    'reaction_1': [((2, 18), 'GT', 9.0), ((2, 17), 'GT', 9.0)],  
-    'reaction_2': [((4, 5), 'GT', 9.0)],  
-    # add more channels and pairs as needed
-    }
-    '''
-
-    pairs_to_test = {
-    'Habstr_1': [((0, 1), 'GT', 10.0)],
-    'Habstr_2': [((0, 2), 'GT', 10.0)],
-    'Nonreact': [((0, 1), 'LT', 2.5), ((0, 2), 'LT', 2.5), ((0, 3), 'GT', 10.0)]
-    # add more channels and pairs as needed
-    }
-
-
-    
-    print("\nReaction of ZZ-OH-allyl + O2")
-    print()
-
-
-    #reaction =  Collision(zzallyl, oxygen, qchem=qcinput) 
-    #reaction =  Collision(zzallyl, NO, qchem=qcinput_singlet) 
-    reaction =  Collision(water, NO, qchem=qcinput_doublet) 
-    #reaction.Specify_Collision_Sampling(Rini=8.5, bmax=4.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
-    reaction.Specify_Collision_Sampling(Rini=9.0, bmax=3.0, bsampling=True, Ecoll=20.0, temp=300.0)
-
-
-    reaction.sample_and_run_collision(integrator='leapfrog', integrator_order=4, timestep=1.0, maxstep=10000, iprint=1, pairs_to_stop=pairs_to_test)
-
-    '''
-    pairs_to_test = {
-    'capture_ON-C1': [((0, 5), 'LT', 1.5)],  
-    'capture_ON-C2': [((1, 5), 'LT', 1.5)],  
-    'capture_NO-C1': [((0, 6), 'LT', 1.5)],  
-    'capture_NO-C2': [((1, 6), 'LT', 1.5)],  
-    'reaction_1': [((0, 5), 'GT', 67.0), ((0, 6), 'GT', 10.0)],  
-    # add more channels and pairs as needed
-    }
-
-
-    qcinput_vinyl_singlet = {
-    'qchem': 'XTB',
-    'path': '/home/peter/orca_6_0_0/xtb',
-    'nproc': 4,
-    'functional': '',
-    'basis': '',
-    'charge': 0,
-    'multiplicity': 1,
-    'additional': '--acc 100 --iterations 1000 --spinpol --tblite',
-    'wfu': False
-    }
-
-    print("\nReaction of Vinyil + NO")
-    print()
-
-    reaction =  Collision(vinyl, NO, qchem=qcinput_vinyl_singlet)
-    #reaction =  Collision(vinyl, NO, qchem=qcinput_Orca)
-    reaction.Specify_Collision_Sampling(Rini=6.0, bmax=4.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
-
-    reaction.sample_and_run_collision(integrator='symplectic', integrator_order=4, timestep=1.0, maxstep=10000, pairs_to_stop=pairs_to_test, iprint=1)
-    '''
-
-
-   
-
-
-
+                            iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=restart, collision=True, Rstop=Rstop, pairs_to_stop=pairs_to_stop, spectrum=spectrum)
 

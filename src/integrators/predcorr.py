@@ -97,7 +97,6 @@ class PredCorr:
         sum_q = np.zeros_like(q)
         sum_p = np.zeros_like(p)
         for j in range(1, self.order):
-            print("asdasd:", j, self.am_coeff[j-1]*24)
             sum_q += self.am_coeff[j-1] * self.save_veloc[j,:]
             sum_p += self.am_coeff[j-1] * self.save_force[j,:]
 
