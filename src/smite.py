@@ -614,7 +614,7 @@ class Fragment(Molecule):
         return
 
 
-    def Specify_Mode_Sampling(self, init_vib_type='ZPE', init_rot_type='Jfix', MDfile=None, **kwargs):
+    def Specify_Mode_Sampling(self, init_vib_type='ZPE', init_rot_type='Jfix', MDfile=None, MDprimitive=False, **kwargs):
         temp = kwargs.get('temp', None)
         jrot = kwargs.get('jrot', None)
         nvib = kwargs.get('nvib', None)
@@ -652,6 +652,11 @@ class Fragment(Molecule):
         #-----------------------------------------------------------------------------------
 
         self.rotsampling = initialize_rotational_modes(init_rot_type=init_rot_type, temp=temp, jrot=jrot)
+        self.MDprimitive = MDprimitive
+        self.MDtemp      = temp
+
+
+        random_initialize_momenta(p, wmass, Temp_init)
         return
 
 
@@ -705,30 +710,35 @@ class Fragment(Molecule):
         if len(self.atoms) <= 2:
             raise ValueError("ERROR: Polyatom_Sample requires more than two atoms.")
 
-        if not self.rigid and not self.fromMD:
+        if not self.rigid and not self.fromMD and not self.MDprimitive:
             self.q, self.p = polyatom_vibration_sampling(mass=self.mass, atoms=self.atoms, q_eq=self.q_ini, ww=self.freq, L=self.Lmat,
                                                    vib_modes=self.vibsampling, verbosity=verbosity, traj_index=traj_index)
 
-        if not self.rigid and self.fromMD:
+        if not self.rigid and self.fromMD and not self.MDprimitive:
             self.sampling_polyatom_from_MDfile() 
+
+        #just primitve MD momenta generation, no sophisticated method sampling
+        if not self.rigid and self.fromMD and self.MDprimitive:
+            self.p = random_initialize_momenta(self.wmass, self.MDtemp)
 
 
         self.q, self.p = cenmass(self.q, self.p, self.mass)
 
         #coordinate (self.q) does not change when we dress up the molecule with an angular momentum to rotate
-        self.p, angmom, inertia = polyatom_rotation_sampling(rot_modes=self.rotsampling, mass=self.mass, q=self.q, p=self.p)
+        if not self.MDprimitive:
+            self.p, angmom, inertia = polyatom_rotation_sampling(rot_modes=self.rotsampling, mass=self.mass, q=self.q, p=self.p)
 
-       #here we should add the vibration too
-        evib = 0.0
-        erot = sum([angmom[i]**2 / inertia[i]/2.0 for i in range(len(angmom))])
+            #here we should add the vibration too
+            evib = 0.0
+            erot = sum([angmom[i]**2 / inertia[i]/2.0 for i in range(len(angmom))])
 
-        self.erot     = erot
-        self.vib      = evib #the vibrational that Evib = Etot - Erot
-        self.inertia  = inertia
-        self.angmom   = angmom
+            self.erot     = erot
+            self.vib      = evib #the vibrational that Evib = Etot - Erot
+            self.inertia  = inertia
+            self.angmom   = angmom
 
 
-       #randomly rotate the molecule about its center of mass
+        #randomly rotate the molecule about its center of mass
         if self.random_rot == True:
             self.q, self.p = euler_rot(self.q, self.p)
 

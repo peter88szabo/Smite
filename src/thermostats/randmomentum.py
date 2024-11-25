@@ -1,7 +1,7 @@
 import numpy as np
 import random
 
-def random_initialize_momenta(p, wmass, Temp_init):
+def random_initialize_momenta(wmass, Temp_init):
     """
     Initialize atomic momenta to fulfill
     the Maxwell-Boltzmann distribution
