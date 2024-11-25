@@ -80,6 +80,7 @@ class Molecule:
         self.vref       = 0.0  #the equilibrium pot energy of fragment 
         self.vini       = None #the initial (sampled) pot energy which is likely out of equilibrium
         self.tini       = None
+        self.qsave      = []
         self.vsave      = []
         self.dsave      = []
 
@@ -87,6 +88,7 @@ class Molecule:
         #mass weighted velcity u = M^1/2 * v
         #each element of the list is mass weigthed velocity vector corresponding to a timestep
         self.vsave.append(self.p / np.sqrt(self.wmass)) 
+        self.qsave.append(self.q) 
 
         #qxyz = np.reshape(self.q, (-1, 3))
 
@@ -100,7 +102,46 @@ class Molecule:
         #self.dsave.append(dist_vector)
 
 
-    def vibrational_spectrum(self, **kwargs):
+    def vibrational_spectrum(self, dt, print_maxfreq=5000.0):
+        import matplotlib.pyplot as plt
+        import math
+
+        c5=219474.0 #[Hartree]*c5=[cm-1]
+        two_pi = 2.0 * math.pi
+
+        freq_cm1 = None
+        total_velo_power = None
+
+        for i in range(len(self.p)):
+            vthis = [v[i] for v in self.vsave]
+
+            actual_length = len(vthis)
+
+            velocity_fft = np.fft.rfft(vthis)
+            velo_power = np.abs(velocity_fft)**2
+
+        # Compute the corresponding frequencies (same for all components)
+            if freq_cm1 is None:  # Compute only once
+                freq_hz = np.fft.rfftfreq(actual_length, d=dt)
+                freq_cm1 = freq_hz * c5 / two_pi
+
+        # Accumulate the power spectrum
+            if total_velo_power is None:
+                total_velo_power = velo_power
+            else:
+                total_velo_power += velo_power
+
+        plt.figure(figsize=(8, 5))
+        plt.plot(freq_cm1, total_velo_power, label="FFT of Velocity")
+        plt.xlim(0, print_maxfreq)  # Set x-axis limit
+        plt.xlabel("Frequency (cm$^{-1}$)")
+        plt.ylabel("Velocity Power Spectrum")
+        plt.legend()
+        plt.grid()
+
+        file_to_save = self.fname + '_velocity_power_spectrum_' + '.png'
+        plt.savefig(file_to_save, dpi=300, bbox_inches='tight')
+
         return
 
     def center_of_mass(self, q, mass):
@@ -214,6 +255,9 @@ class Molecule:
 
         #--------------------------------------------------------------------------------------
         if not restart:
+            self.qsave = []
+            self.vsave = []
+            self.dsave = []
             print("\n********************************************************************************************")
             if os.path.exists(traj_file):
                 os.remove(traj_file)

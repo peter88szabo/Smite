@@ -90,7 +90,7 @@ if __name__ == '__main__':
 
     fix_quantum_water = [(0, 6)]
 
-    seed = 12949102
+    seed = 12949112
     random.seed(seed)
 
     #water  = Fragment.Polyatom_Init(fname=fname_water, qchem=qcinput_singlet, xyz=xyz_water, random_rot=False)
@@ -102,13 +102,15 @@ if __name__ == '__main__':
     diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
 
     print('\nNVT segment equilibriate at 500 K:')
-    diene.sample_and_run_trajectory(traj_file='NVT_equilibriate.xyz',integrator='leapfrog', integrator_order=4, timestep=0.5, maxstep=1000, iprint=1, Rstop=10.0, thermostat='berendsen', thermo_param=2.0, thermo_temp=500.0) 
+    diene.sample_and_run_trajectory(traj_file='NVT_equilibriate.xyz',integrator='leapfrog', integrator_order=4, timestep=0.5, maxstep=500, iprint=1, Rstop=10.0, thermostat='berendsen', thermo_param=2.0, thermo_temp=500.0) 
     print('\nNVT segment production at 500 K:')
-    diene.run_trajectory(traj_file='NVT_production.xyz', integrator='leapfrog', integrator_order=4, timestep=0.5, maxstep=1000, iprint=1, Rstop=10.0, thermostat='berendsen', thermo_param=5.0, thermo_temp=500.0) 
+    diene.run_trajectory(traj_file='NVT_production.xyz', integrator='leapfrog', integrator_order=4, timestep=0.5, maxstep=500, iprint=1, Rstop=10.0, thermostat='berendsen', thermo_param=5.0, thermo_temp=500.0) 
     print('\nNVE segment:')
-    diene.run_trajectory(traj_file='NVE_final.xyz', integrator='symplectic', integrator_order=4, timestep=0.5, maxstep=500, iprint=1, Rstop=10.0, spectrum=True) 
+    diene.run_trajectory(traj_file='NVE_final.xyz', integrator='symplectic', integrator_order=4, timestep=0.5, maxstep=5000, iprint=1, Rstop=10.0, spectrum=True) 
 
-    print(diene.vsave[46])
+    #print(diene.vsave[46])
+
+    diene.vibrational_spectrum(dt=0.5, print_maxfreq=4000.0)
 
 
 
