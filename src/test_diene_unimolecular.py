@@ -2,15 +2,6 @@ if __name__ == '__main__':
     import random
     from smite import Molecule, Fragment, Collision
 
-    c1   = 0.52917721092         # [bohr]     * c1 = [Ansgtrom]
-    c3   = 1838.6836605e0        # [g/mol]    * c3 = [electron mass unit]
-    c5   = 219474.e0            # [Hartree]  * c5 = [cm-1]
-    c6   = 41.341105             # [fs]       * c6 = [time in au]
-    c7   = 2625.5                # [Hartree]  * c7 = [kJ/mol]
-    c9   = 1.0e8/c1             # [freqcm-1] *c9=[freq(bohr^(-1))]
-    c10  = 137.035999074        # [speed of light in atomic unit]
-    Rgas = 8.3144598/1000.0/c7 #Hartree/K
-
     xyz_water = '''
       O    -0.011100  0.0000  -0.00788
       H     0.007500  0.0000   0.95111
@@ -105,16 +96,20 @@ if __name__ == '__main__':
     #water  = Fragment.Polyatom_Init(fname=fname_water, qchem=qcinput_singlet, xyz=xyz_water, random_rot=False)
     #water.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=3)
 
-    diene  = Fragment.Polyatom_Init(fname='diene', qchem=qcinput_Sparrow_bin, xyz=xyz_diene, random_rot=False)
+    diene  = Fragment.Polyatom_Init(fname='diene', qchem=qcinput_XTB, xyz=xyz_diene, random_rot=False)
 
    #diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10, fix_quantum=fix_quantum, fix_temp=fix_temp)
     diene.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
 
-    diene.sample_and_run_trajectory(integrator='leapfrog', integrator_order=4, timestep=0.5, maxstep=500, iprint=1, Rstop=10.0, spectrum=True) 
-    print()
-    print(diene.vsave[14])
-    print()
-    print(diene.dsave[14])
+    print('\nNVT segment equilibriate at 500 K:')
+    diene.sample_and_run_trajectory(traj_file='NVT_equilibriate.xyz',integrator='leapfrog', integrator_order=4, timestep=0.5, maxstep=1000, iprint=1, Rstop=10.0, thermostat='berendsen', thermo_param=2.0, thermo_temp=500.0) 
+    print('\nNVT segment production at 500 K:')
+    diene.run_trajectory(traj_file='NVT_production.xyz', integrator='leapfrog', integrator_order=4, timestep=0.5, maxstep=1000, iprint=1, Rstop=10.0, thermostat='berendsen', thermo_param=5.0, thermo_temp=500.0) 
+    print('\nNVE segment:')
+    diene.run_trajectory(traj_file='NVE_final.xyz', integrator='symplectic', integrator_order=4, timestep=0.5, maxstep=500, iprint=1, Rstop=10.0, spectrum=True) 
+
+    print(diene.vsave[46])
+
 
 
 

@@ -2,15 +2,6 @@ if __name__ == '__main__':
     import random
     from smite import Molecule, Fragment, Collision
 
-    c1   = 0.52917721092         # [bohr]     * c1 = [Ansgtrom]
-    c3   = 1838.6836605e0        # [g/mol]    * c3 = [electron mass unit]
-    c5   = 219474.e0            # [Hartree]  * c5 = [cm-1]
-    c6   = 41.341105             # [fs]       * c6 = [time in au]
-    c7   = 2625.5                # [Hartree]  * c7 = [kJ/mol]
-    c9   = 1.0e8/c1             # [freqcm-1] *c9=[freq(bohr^(-1))]
-    c10  = 137.035999074        # [speed of light in atomic unit]
-    Rgas = 8.3144598/1000.0/c7 #Hartree/K
-
     #vinyl radical optimized by XTB-spinpol
     xyz_vinyl = '''
     C           -0.06765881401168        0.36069437750287        0.21726087063540

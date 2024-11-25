@@ -90,6 +90,62 @@ def parseCheckPoint(xyz_file_path):
     return last_step, atoms, q, p
 
 
+def parse_MDtraj_as_sampling(xyz_file_path):
+    '''
+    Parse the XYZ trajectory file and save all geometries (q and p coordinates) into a dictionary.
+    The dictionary keys are the geometry indices, and the values are tuples (q, p).
+    '''
+
+    b2a = 0.52917721092
+
+    with open(xyz_file_path, 'r') as xyz_file:
+        lin = xyz_file.readlines()
+
+    first_index = last_index = None
+
+    # dictionary to store (q, p) pairs
+    qp_pair = {}
+
+    i = 0
+    while i < len(lin):
+        try:
+            Natoms = int(lin[i].strip())
+        except ValueError:
+            raise ValueError(f"Invalid number of atoms in line {i+1}: {lin[i]}")
+
+        comment_line = lin[i + 1].strip().split()
+        geometry_index = int(comment_line[1])  # Assumes second entry is the index
+
+        if first_index is None:
+            first_index = geometry_index
+        last_index = geometry_index
+
+        atom_lines = lin[i + 2:i + 2 + Natoms]
+        q = []
+        p = []
+
+        for line in atom_lines:
+            parts = line.strip().split()
+            x, y, z, px, py, pz = (
+                float(parts[1]) / b2a,
+                float(parts[2]) / b2a,
+                float(parts[3]) / b2a,
+                float(parts[4]),
+                float(parts[5]),
+                float(parts[6])
+            )
+            q.extend([x, y, z])
+            p.extend([px, py, pz])
+
+        qp_pair[geometry_index] = (np.array(q), np.array(p))
+
+        i += 2 + Natoms
+
+        indicies = (first_index, last_index)
+
+    return indicies, qp_pair
+
+
 def makeXYZ(atoms, q):
     b2a = 0.52917721092
     natoms = len(atoms)

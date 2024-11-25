@@ -6,6 +6,7 @@ import random
 
 from utils.cenmass                import cenmass
 from utils.euler                  import euler_rot          
+from utils.format_and_print       import parse_MDtraj_as_sampling 
 from utils.format_and_print       import parseCheckPoint
 from utils.format_and_print       import parseXYZ
 from utils.format_and_print       import print_trajectory
@@ -19,6 +20,7 @@ from normalmode.hessian           import getHessian
 from normalmode.eckart            import eckart_transform
 from normalmode.nmodeprint        import print_normalmode 
 from normalmode.normalmode        import print_frequencies 
+from normalmode.normalmode        import getNormalmode  
 
 from sampling.polyvibration       import initialize_vibrational_modes
 from sampling.polyrotation        import initialize_rotational_modes
@@ -69,6 +71,7 @@ class Molecule:
         self.mass       = np.array(mass)
         self.wmass      = np.repeat(mass, 3)
         self.totmass    = np.sum(mass) 
+        self.fromMD     = False
         self.qchem      = None 
         self.last_step  = last_step
         self.Rstop      = None 
@@ -85,16 +88,19 @@ class Molecule:
         #each element of the list is mass weigthed velocity vector corresponding to a timestep
         self.vsave.append(self.p / np.sqrt(self.wmass)) 
 
-        qxyz = np.reshape(self.q, (-1, 3))
+        #qxyz = np.reshape(self.q, (-1, 3))
 
-        dist_matrix = np.linalg.norm(qxyz[:, np.newaxis, :] - qxyz[np.newaxis, :, :], axis=-1)
+        #dist_matrix = np.linalg.norm(qxyz[:, np.newaxis, :] - qxyz[np.newaxis, :, :], axis=-1)
+
+        # Extract the upper triangle of dist_matrix without the diagonal entries
+        #upper_triangle_indices = np.triu_indices_from(dist_matrix, k=1)
+        #dist_vector = dist_matrix[upper_triangle_indices]
 
         #each element of the list is the distance matrix corresponding to a timestep 
-        self.dsave.append(dist_matrix)
+        #self.dsave.append(dist_vector)
 
 
     def vibrational_spectrum(self, **kwargs):
-        self.vsave 
         return
 
     def center_of_mass(self, q, mass):
@@ -265,8 +271,8 @@ class Molecule:
                     dE = E - E0
 
 
-                    #here we sould print temperature too...
-                    print_trajectory(file_trj, self.atoms, self.q, self.p, V, dE, dt, istep)
+                    self.print_trajectory(file_trj, istep, dt, T, V, dE, act_temp)
+                    #print_trajectory(file_trj, self.atoms, self.q, self.p, V, dE, dt, istep)
 
 
 
@@ -282,10 +288,10 @@ class Molecule:
                             tstop = test_to_stop_general(q=self.q, tol=self.Rstop)
                             channel = 'Not Specified'
 
-                        print(f"step: {istep:<10d} t[fs]: {istep*dt/c6:<12.1f} (V-V0)[Eh]: {(V-self.vref):<16.6f} (E-V0)[Eh]: {(E-self.vref):<16.6f} dE[kJ]: {dE*c7:16.3f}    T[K]: {act_temp:<10.2f} Rcom[A]: {Rcom_actual*b2a:8.2f}")
+                        print(f"step: {istep:<10d} t[fs]: {istep*dt/c6:<12.1f} V[Eh]: {(V-self.vref):<16.6f} E[Eh]: {(E-self.vref):<16.6f} dE[kJ]: {dE*c7:16.3f}    T[K]: {act_temp:10.1f} Rcom[A]: {Rcom_actual*b2a:8.2f}")
 
                     else: #if not collision (just unimolecular dynamics) then we can ran the test anytime
-                        print(f"step: {istep:<10d} t[fs]: {istep*dt/c6:<12.2f}  V[Eh]: {V:<16.6f} E[Eh]: {E:<16.6f} dE[kJ]: {dE*c7:16.3f}     T[K]: {act_temp:<10.2f}")
+                        print(f"step: {istep:<10d} t[fs]: {istep*dt/c6:<12.2f}  V[Eh]: {V:<16.6f} E[Eh]: {E:<16.6f} dE[kJ]: {dE*c7:16.3f}     T[K]: {act_temp:<10.1f}")
                         if self.pairstop is not None and self.Rstop is None:
                             tstop, channel = test_to_stop_specific(q=self.q, pairs_to_test=self.pairstop)
                         elif self.pairstop is None and self.Rstop is not None:
@@ -341,7 +347,8 @@ class Molecule:
                 #--------------------------------------------------------------------------
                 #Backup:
                 backup_file=open(backfile,'w')
-                print_trajectory(backup_file, self.atoms, self.q, self.p, V, dE, dt, istep)
+                self.print_trajectory(backup_file, istep, dt, T, V, dE, act_temp)
+                #print_trajectory(backup_file, self.atoms, self.q, self.p, V, dE, dt, istep)
                 backup_file.close()
                 #--------------------------------------------------------------------------
 
@@ -412,10 +419,14 @@ class Molecule:
             trajfile.write("%3s %15.5f  %15.5f %15.5f \n" % (self.atoms[i], self.q[jx]*b2a, self.q[jy]*b2a, self.q[jz]*b2a))
 
 
-    def print_trajectory(self, trajfile, igeom):
+    def print_trajectory(self, trajfile, istep, dt, T, V, dE, Temp):
         b2a = 0.52917721092
+        c7 = 2625.5  #[Hartree]*c7=[kJ/mol] 
+        c5 = 219474.0  #[Hartree]*c5=[cm-1]
+        c6 = 41.341105 #[femto-sec]*c6=[time in au]
         trajfile.write(str(self.natom) + "\n")
-        trajfile.write("%8s %10d \n" % ("geom = ", igeom ))
+        trajfile.write("%6s %10d %8s %10.2f %12s %16.8f %12s %12.8f %10s %15.4f %8s %7.1f\n" %
+                       ("step= ",istep, " t[fs]= ", dt*istep/c6, " Vpot[Eh]= ", V, " Tkin[Eh]= ", T, " dE[kJ]= ",dE*c7, " T[K]= ", Temp ))
         for i in range(self.natom):
             jx = 3*i
             jy = 3*i+1
@@ -449,6 +460,8 @@ class Fragment(Molecule):
         self.overlap      = None
         self.rigid        = False
         self.random_rot   = False
+        self.MDsamp_qp    = None
+        self.MDsamp_index = None
         
 
     @classmethod
@@ -519,7 +532,7 @@ class Fragment(Molecule):
         return this 
 
     @classmethod
-    def Polyatom_Init(cls, fname, qchem, xyz, nfix=0, linear=False, is_eckart=True, random_rot=True, rigid=False, Amp_modeanim=30.0):
+    def Polyatom_Init(cls, fname, qchem, xyz, nfix=0, linear=False, is_eckart=True, random_rot=True, rigid=False, fromMD=False, Amp_modeanim=30.0, print_nmode=True):
 
         natom, atoms, q_eq = parseXYZ(xyz)
         q_eq = np.array(q_eq) / 0.52917721092  #Angstrom to Bohr
@@ -532,37 +545,39 @@ class Fragment(Molecule):
         if rigid:
             nfix = 3 * natom - 6 + linear
 
-
         mass = get_mass_vector(atoms)
-
-        hessFile = 'hessian_' + fname + '.hess'
-
-        hessian = getHessian(qcinput=qchem, hessFile=hessFile, xyz=xyz)
-
-        freq, freq_low, Lmat = print_normalmode(fname=fname, atoms=atoms, mass=mass, q_eq=q_eq, hessian=hessian,
-                                                give_freq_and_Lmat=True, Amp=Amp_modeanim,
-                                                is_eckart=is_eckart, linear=linear)
-
-        freq_all = np.append(freq_low, freq)
-
-        print_frequencies(fname,freq_all)
 
         this = cls(atoms=atoms, mass=mass, q_ini=q_eq, p_ini=p_ini)
 
-
         this.fname      = fname
-        this.hessFile   = hessFile
-        this.hessian    = hessian
-        this.freq       = freq
-        this.Lmat       = Lmat
         this.qchem      = qchem
         this.linear     = linear
         this.rigid      = rigid
         this.random_rot = random_rot
         this.nfix       = nfix
-        
-        if qchem['qchem'] == 'Orca':
-            this.delete_orca_tmp()
+        this.fromMD     = fromMD
+       #--------------------------------------------------------------------
+        if not rigid and not fromMD:
+            hessFile = 'hessian_' + fname + '.hess'
+            hessian = getHessian(qcinput=qchem, hessFile=hessFile, xyz=xyz)
+
+            if print_nmode:
+                freq, freq_low, Lmat = print_normalmode(fname=fname, atoms=atoms, mass=mass, q_eq=q_eq, hessian=hessian,
+                                                    give_freq_and_Lmat=True, Amp=Amp_modeanim, is_eckart=is_eckart, linear=linear)
+            else:
+                freq, freq_low, Lmat = getNormalmode(mass=mass, hessian=hessian, linear=linear, q_eq=q_eq, is_eckart=is_eckart)
+
+            freq_all = np.append(freq_low, freq)
+
+            print_frequencies(fname,freq_all)
+
+            this.hessFile   = hessFile
+            this.hessian    = hessian
+            this.freq       = freq
+            this.Lmat       = Lmat
+
+            if qchem['qchem'] == 'Orca':
+                this.delete_orca_tmp()
 
         return this
 
@@ -599,12 +614,13 @@ class Fragment(Molecule):
         return
 
 
-    def Specify_Mode_Sampling(self, init_vib_type='ZPE', init_rot_type='Jfix', **kwargs):
+    def Specify_Mode_Sampling(self, init_vib_type='ZPE', init_rot_type='Jfix', MDfile=None, **kwargs):
         temp = kwargs.get('temp', None)
         jrot = kwargs.get('jrot', None)
         nvib = kwargs.get('nvib', None)
         energy = kwargs.get('energy', None)
 
+        #-----------------------------------------------------------------------------------
         #Non-rigid Diatom case:
         if not self.rigid and len(self.atoms) == 2:
             if 'nvib' in kwargs:
@@ -614,14 +630,26 @@ class Fragment(Molecule):
             elif 'temp' in kwargs:
                 self.vibsampling[0] = (self.omega_diat, 'T', temp) 
 
-        #Non-rigid Polyatom case:
-        elif not self.rigid and len(self.atoms) > 2:
+        #-----------------------------------------------------------------------------------
+        #Non-rigid Polyatom case Harmonic Sampling:
+        if not self.rigid and not self.fromMD and len(self.atoms) > 2:
            #uniformly initialize all modes (w.r.t to ZPE or Temperature):
             self.vibsampling = initialize_vibrational_modes(freq=self.freq, init_vib_type=init_vib_type, temp=temp)
 
            #if necessary then we may change certain modes sampling
             if {'fix_quantum', 'fix_energy', 'fix_temp'}.intersection(kwargs):
                 self.vibsampling = specify_vib_modes(vib_modes=self.vibsampling, **kwargs)
+
+        #-----------------------------------------------------------------------------------
+        #Non-rigid Polyatom case Sampling MD file:
+        if not self.rigid and self.fromMD and len(self.atoms) > 2:
+            if MDfile is None:
+                raise ValueError("If fromMD = True then MDfile must be given in input")
+            if not os.path.exists(MDfile):
+                raise ValueError("MDfile is not found")
+
+            self.MDsamp_index, self.MDsamp_qp = parse_MDtraj_as_sampling(MDfile)
+        #-----------------------------------------------------------------------------------
 
         self.rotsampling = initialize_rotational_modes(init_rot_type=init_rot_type, temp=temp, jrot=jrot)
         return
@@ -677,9 +705,12 @@ class Fragment(Molecule):
         if len(self.atoms) <= 2:
             raise ValueError("ERROR: Polyatom_Sample requires more than two atoms.")
 
-        if self.rigid == False:
+        if not self.rigid and not self.fromMD:
             self.q, self.p = polyatom_vibration_sampling(mass=self.mass, atoms=self.atoms, q_eq=self.q_ini, ww=self.freq, L=self.Lmat,
                                                    vib_modes=self.vibsampling, verbosity=verbosity, traj_index=traj_index)
+
+        if not self.rigid and self.fromMD:
+            self.sampling_polyatom_from_MDfile() 
 
 
         self.q, self.p = cenmass(self.q, self.p, self.mass)
@@ -710,6 +741,36 @@ class Fragment(Molecule):
             raise ValueError("Overlap detected when the polyatomic fragment is sampled")
 
         return
+
+    def sampling_polyatom_from_MDfile(self):
+        '''
+        we already saved the q, p coords (as dictionary self.MDsamp_qp)
+        originally created from a molecular dynamics run (likely NVT)
+
+        then we choose a random trajectory index (random time)
+        that will define self.q and self.p
+
+        since those q and p coord are distorted
+        first we need remove the COM motion
+        and probably Eckart rotation too...or not???
+        '''
+
+        if self.froMD is None:
+            raise ValueError("First you must initialize Polyatom_Init() as fromMD=True")
+
+        #the index of the first time-step
+        #and the index of last time-step in the MD file
+        first, last = self.MDsamp_index
+
+        #just in case the index does not exsist in the list
+        while True:
+            rnd = random.randint(first, last)
+            if rnd in self.MDsamp_qp:
+                self.q, self.p = self.MDsamp_qp[rnd]
+                #later after calling this function
+                #we purify the COM motion
+                break
+
 
 
 class Collision(Molecule):
