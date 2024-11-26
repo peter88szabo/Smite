@@ -80,15 +80,12 @@ class Molecule:
         self.vref       = 0.0  #the equilibrium pot energy of fragment 
         self.vini       = None #the initial (sampled) pot energy which is likely out of equilibrium
         self.tini       = None
-        self.qsave      = []
         self.vsave      = []
-        self.dsave      = []
 
     def save_velocity_and_distance_matrix(self):
         #mass weighted velcity u = M^1/2 * v
         #each element of the list is mass weigthed velocity vector corresponding to a timestep
         self.vsave.append(self.p / np.sqrt(self.wmass)) 
-        self.qsave.append(self.q) 
 
         #qxyz = np.reshape(self.q, (-1, 3))
 
@@ -255,9 +252,7 @@ class Molecule:
 
         #--------------------------------------------------------------------------------------
         if not restart:
-            self.qsave = []
             self.vsave = []
-            self.dsave = []
             print("\n********************************************************************************************")
             if os.path.exists(traj_file):
                 os.remove(traj_file)
