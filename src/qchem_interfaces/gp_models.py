@@ -2,10 +2,10 @@ from typing import Optional
 
 import numpy as np
 import torch
-from sklearn.base import TransformerMixin
 from torch import ScriptModule
+from sklearn.base import TransformerMixin
 
-from gp_modelmanager import get_modelmanager
+from src.qchem_interfaces.gp_modelmanager import get_modelmanager
 
 # [Hartree]*ha2ev=[eV]
 ha2ev = 27.2114
@@ -37,7 +37,8 @@ class GPModel:
     """
 
     def __init__(self, models: list[ScriptModule], transformers: Optional[list[TransformerMixin]] = None):
-        super().__init__(models, transformers)
+        self.models = models
+        self.transformers = transformers
 
     def n_states(self):
         return len(self.models)
