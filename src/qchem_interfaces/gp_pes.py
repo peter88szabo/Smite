@@ -1,6 +1,6 @@
 import numpy as np
 
-from gp_models import get_gpmodel
+from src.qchem_interfaces.gp_models import get_gpmodel
 
 def PES_Energy(qcoord: np.ndarray, states: int | list | None = None):
     model = get_gpmodel()
