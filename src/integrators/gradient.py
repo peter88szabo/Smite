@@ -5,7 +5,7 @@ from qchem_interfaces.pyscfrun    import PySCF_Force, PySCF_Energy
 from qchem_interfaces.sparrowbin  import Sparrowbin_Force, Sparrowbin_Energy
 from qchem_interfaces.sparrowpy   import SparrowPy_Force, SparrowPy_Energy
 from qchem_interfaces.xtbrun      import XTB_Force, XTB_Energy
-
+from qchem
 
 def Potential_Energy(qcinput, file_wf, q, atoms):
 
