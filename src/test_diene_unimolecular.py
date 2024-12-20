@@ -34,7 +34,7 @@ if __name__ == '__main__':
     'basis': '',
     'charge': 0,
     'multiplicity': 1,
-    'additional': '--acc 50 --iterations 200',
+    'additional': ' --ptb --iterations 200',
     'wfu': False
     }
 
@@ -78,8 +78,8 @@ if __name__ == '__main__':
     rigid = False
     random_rot = False #True
 
-    fix_quantum = [(14, 1),
-                   (15, 1)]
+    fix_quantum = [(14, 0),
+                   (15, 0)]
 
     fix_energy  = [(0, 0.0),
                    (1, 0.0),
@@ -106,11 +106,11 @@ if __name__ == '__main__':
     print('\nNVT segment production at 500 K:')
     diene.run_trajectory(traj_file='NVT_production.xyz', integrator='leapfrog', integrator_order=4, timestep=0.5, maxstep=500, iprint=1, Rstop=10.0, thermostat='berendsen', thermo_param=5.0, thermo_temp=500.0) 
     print('\nNVE segment:')
-    diene.run_trajectory(traj_file='NVE_final.xyz', integrator='symplectic', integrator_order=4, timestep=0.5, maxstep=5000, iprint=1, Rstop=10.0, spectrum=True) 
+    diene.run_trajectory(traj_file='NVE_final.xyz', integrator='symplectic', integrator_order=4, timestep=0.5, maxstep=3000, iprint=1, Rstop=10.0, spectrum=True) 
 
     #print(diene.vsave[46])
 
-    diene.vibrational_spectrum(dt=0.5, print_maxfreq=4000.0)
+    diene.vibrational_spectrum(dt=0.5, print_maxfreq=5000.0)
 
 
 

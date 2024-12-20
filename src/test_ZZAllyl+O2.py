@@ -31,7 +31,7 @@ if __name__ == '__main__':
     'basis': '',
     'charge': 0,
     'multiplicity': 2,
-    'additional': '--acc 50 --iterations 1000 --spinpol --tblite',
+    'additional': '--ptb --acc 50 --iterations 1000 --spinpol --tblite',
     'wfu': False 
     }
 
@@ -43,7 +43,7 @@ if __name__ == '__main__':
     'basis': '',
     'charge': 0,
     'multiplicity': 1,
-    'additional': '--acc 50 --iterations 1000 --spinpol --tblite',
+    'additional': '--ptb --acc 50 --iterations 1000 --spinpol --tblite',
     'wfu': False
     }
 
@@ -102,7 +102,7 @@ if __name__ == '__main__':
     random.seed(seed)
 
 
-    zzallyl  = Fragment.Polyatom_Init(fname='ZZAllyl', qchem=qcinput_Orca, xyz=xyz_zzallyl, random_rot=True)
+    zzallyl  = Fragment.Polyatom_Init(fname='ZZAllyl', qchem=qcinput_doublet, xyz=xyz_zzallyl, random_rot=True)
     #zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
 ##################    zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Temp', temp=300.0)
     zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=20)
@@ -132,7 +132,7 @@ if __name__ == '__main__':
     print()
 
 
-    reaction =  Collision(zzallyl, oxygen, qchem=qcinput_Orca) 
+    reaction =  Collision(zzallyl, oxygen, qchem=qcinput_doublet) 
     reaction.Specify_Collision_Sampling(Rini=6.5, bmax=4.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
 
     reaction.sample_and_run_collision(integrator='leapfrog', integrator_order=4, timestep=0.5, maxstep=10000, iprint=1, pairs_to_stop=pairs_to_test)
