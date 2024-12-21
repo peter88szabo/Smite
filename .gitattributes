@@ -1,10 +1,9 @@
-peslib/*.f90 linguist-vendored
-peslib/*.f linguist-vendored
-peslib/*.for linguist-vendored
-
-# Alternatively, force Fortran files to be treated as Python for statistics
+# Classify all Python files as Python
 *.py linguist-language=Python
+
+# Force Fortran files in peslib to be classified as Python
 peslib/*.f90 linguist-language=Python
 peslib/*.f linguist-language=Python
 peslib/*.for linguist-language=Python
+
 
