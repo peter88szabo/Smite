@@ -498,6 +498,7 @@ class Fragment(Molecule):
         self.omega_diat   = None
         self.overlap      = None
         self.rigid        = False
+        self.surface      = False
         self.random_rot   = False
         self.MDsamp_qp    = None
         self.MDsamp_index = None
@@ -571,7 +572,8 @@ class Fragment(Molecule):
         return this 
 
     @classmethod
-    def Polyatom_Init(cls, fname, qchem, xyz, nfix=0, linear=False, is_eckart=True, random_rot=True, rigid=False, fromMD=False, Amp_modeanim=30.0, print_nmode=True):
+    def Polyatom_Init(cls, fname, qchem, xyz, nfix=0, linear=False, is_eckart=True, random_rot=True,
+            rigid=False, fromMD=False, surface=False, Amp_modeanim=30.0, print_nmode=True):
 
         natom, atoms, q_eq = parseXYZ(xyz)
         q_eq = np.array(q_eq) / 0.52917721092  #Angstrom to Bohr
@@ -590,9 +592,14 @@ class Fragment(Molecule):
 
         this.fname      = fname
         this.qchem      = qchem
-        this.linear     = linear
         this.rigid      = rigid
-        this.random_rot = random_rot
+        this.surface    = surface
+        if surface:
+            this.random_rot = False
+            this.linear     = False 
+        else
+            this.random_rot = random_rot
+            this.linear     = linear
         this.nfix       = nfix
         this.fromMD     = fromMD
        #--------------------------------------------------------------------
@@ -655,9 +662,9 @@ class Fragment(Molecule):
 
     def Specify_Mode_Sampling(self, init_vib_type='ZPE', init_rot_type='Jfix', MDfile=None, MDprimitive=False, **kwargs):
         temp = kwargs.get('temp', None)
-        jrot = kwargs.get('jrot', None)
         nvib = kwargs.get('nvib', None)
         energy = kwargs.get('energy', None)
+        jrot = kwargs.get('jrot', None)
 
         #-----------------------------------------------------------------------------------
         #Non-rigid Diatom case:
@@ -764,7 +771,7 @@ class Fragment(Molecule):
         #coordinate (self.q) does not change when we dress up the molecule with an angular momentum to rotate
         #if the excitation (jrot or temp in init_rot_sampling is not defined (is NONE)
         #then we won't do rotation sampling
-        if not self.MDprimitive and self.rotsampling[0][1] is not None:
+        if not self.MDprimitive and not self.surface and self.rotsampling[0][1] is not None:
             self.p, angmom, inertia = polyatom_rotation_sampling(rot_modes=self.rotsampling, mass=self.mass, q=self.q, p=self.p)
 
             #here we should add the vibration too
@@ -778,7 +785,7 @@ class Fragment(Molecule):
 
 
         #randomly rotate the molecule about its center of mass
-        if self.random_rot == True:
+        if self.random_rot == True and self.surface == False:
             self.q, self.p = euler_rot(self.q, self.p)
 
         self.p = np.array(self.p)
@@ -891,6 +898,35 @@ class Collision(Molecule):
         self.surf_atom = surf_target
 
     def Set_Relative_Init_Coords(self):
+        '''
+        The potato (molecule or surface) is aimed by the projectile
+        First its center of mass put into the origin
+
+        If the potato is a surface then it's needed to be
+        oriented in a proper way before collision
+
+
+        By convention, the normal vector of the surface plane
+        is oriented to points toward the X-axis
+
+                    Z |
+                      |
+                      |
+                      |************ <---P (projectile)
+                      |                 |
+                  /\\\\\\\\             | bimp (b - impact param)
+                 /    |    \            |
+                |     O-----|---------------------->
+                 \  /      /           sepx       X
+                  \\\\\\\\/
+                  /          sepx = sqrt(R^2 - b^2)
+                 /
+                /
+               /
+              /
+             Y
+
+            '''
 
         if self.sampling_set == False:
             raise ValueError("Error: First you must call Specify_Collision_Sampling() after you initialized the Collision() class")
@@ -926,31 +962,27 @@ class Collision(Molecule):
             qB[jz] += self.bimp 
 
         if self.surface:
-            #rotate the surface to be in Y-Z plane (the normalvector of surface points toward X)
+            #-------------------------------------------------------
+            if self.surf_skew is None
+            #Random sampling of the skew angle for the projectile
+                tmax = 1.0 - np.cos(theta_max)
 
-            self.qA, self.qB = orient_surface(self.qA, self.pA)
-            self.qA, self.qB = random_rotate_in_YZ_plane(self.qA, self.pA)
+                rnd_skew = random.uniform(0, theta_max)
 
+                theta_skew = np.arccos(1.0 - rnd_skew * tmax)
+            else: 
+            #Fix skew angle for the projectile
+                theta_skew = self.surf_skew
+           #-------------------------------------------------------
             #rotate with random angle in the yz-plane
-            '''        
-                    Z |
-                      |
-                      |
-                      |************ <---P (projectile)
-                      |                 |
-                  /\\\\\\\\             | bimp (b - impact param)
-                 /    |    \            | 
-                |     O-----|---------------------->
-                 \  /      /           sepx       X
-                  \\\\\\\\/            
-                  /          sepx = sqrt(R^2 - b^2)
-                 /
-                /
-               /
-              /  
-             Y
+            phi_yz = random.uniform(0, 2 * math.pi)
+           #-------------------------------------------------------
 
-            '''
+            #rotate the surface to be in Y-Z plane (the normalvector of surface points toward X)
+            axis = np.array([1.0, 0.0, 0.0]) # X-axis
+
+            self.qA, self.qB = orient_surface(axis, self.qA, self.pA)
+            self.qA, self.qB = random_rotate_surface(axis, phi_yz, self.qA, self.pA)
 
         wA = self.fragment_A.totmass
         wB = self.fragment_B.totmass

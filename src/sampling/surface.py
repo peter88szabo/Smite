@@ -33,7 +33,7 @@ def surface_normal(ind, q):
     return normal_vec
 
 
-def rotmat_for_best_overlap(qA, qB):
+def rotmat_for_overlapping_vectors(qA, qB):
     #from utils.cemass import cenmassQ
     '''
     Find the optimal overlap between two 3*N dimensional vector
@@ -87,27 +87,50 @@ def rotmat_for_best_overlap(qA, qB):
 def normalize(v):
     return v / np.linalg.norm(v)
 
-def rodrigues_rotation_matrix(normal, theta):
-    N = normalize(normal)
-    N_x, N_y, N_z = N
+def rodrigues_rotation_matrix(axis, theta):
+    '''
+    Rodrigues' rotation formula gives an efficient method for computing
+    the rotation matrix R in SO(3) corresponding to a rotation
+    by an angle theta about a fixed axis specified by
+    the unit vector defined by the axis: N=(Nx, Ny, Nz) in R^3.
+
+
+    Formula (see Wikipedia): 
+
+         [ 0.0, -Nz,  Ny],
+    K =  [ Nz,  0.0, -Nx],
+         [-Ny,   Nx, 0.0]
+
+    Rotationa matrix:
+
+    R = 1 + sin(theta) * K + (1 - cos(theta)) * K^2
+    '''
+    N = normalize(axis)
+    Nx, Ny, Nz = N
 
     K = np.array([
-        [0, -N_z, N_y],
-        [N_z, 0, -N_x],
-        [-N_y, N_x, 0]
-    ])
-
-    K2 = K @ K
+        [ 0.0, -Nz,  Ny],
+        [ Nz,  0.0, -Nx],
+        [-Ny,   Nx, 0.0]])
 
     # Rodrigues' rotation formula
-    Rmat = np.eye(3) + np.sin(theta) * K + (1.0 - np.cos(theta)) * K2
+    R = np.eye(3) + np.sin(theta) * K + (1.0 - np.cos(theta)) * K @ K
 
-    return Rmat
+    return R
 
-def rotate_points(points, normal, theta):
-    R = rodrigues_rotation_matrix(normal, theta)
-    rotated_points = np.dot(points, R.T)  # Apply rotation matrix
-    return rotated_points
+def rotate_molecule_about_single_axis(R, q):
+    '''
+    R: rotation matrix
+    theta : angle of rotation
+    '''
+
+    qrot = np.zeros_like(q)
+    for i in range(len(q) // 3):
+        qatom = np.array([q[3 * i], q[3 * i + 1], q[3 * i + 2]])
+        qatom_rot = R @ qatom  # Rotate the atom's coordinates
+        qrot[3 * i:3 * i + 3] = qatom_rot
+
+    return qrot 
 
 
 if __name__ == "__main__":
@@ -243,7 +266,7 @@ H            5.26954348044517        0.14192510040879       0.00000000
     print("basis: ", basis)
 
 
-    R = rotmat_for_best_overlap(normalvec, basis)
+    R = rotmat_for_overlapping_vectors(normalvec, basis)
 
     print("\nRotmat:")
     print(R)
