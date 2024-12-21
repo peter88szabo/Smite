@@ -84,6 +84,31 @@ def rotmat_for_best_overlap(qA, qB):
 
     return Rmat 
 
+def normalize(v):
+    return v / np.linalg.norm(v)
+
+def rodrigues_rotation_matrix(normal, theta):
+    N = normalize(normal)
+    N_x, N_y, N_z = N
+
+    K = np.array([
+        [0, -N_z, N_y],
+        [N_z, 0, -N_x],
+        [-N_y, N_x, 0]
+    ])
+
+    K2 = K @ K
+
+    # Rodrigues' rotation formula
+    Rmat = np.eye(3) + np.sin(theta) * K + (1.0 - np.cos(theta)) * K2
+
+    return Rmat
+
+def rotate_points(points, normal, theta):
+    R = rotation_matrix(normal, theta)
+    rotated_points = np.dot(points, R.T)  # Apply rotation matrix
+    return rotated_points
+
 
 if __name__ == "__main__":
     from utils.atomic_masses import get_mass_vector
@@ -238,6 +263,14 @@ H            5.26954348044517        0.14192510040879       0.00000000
     print_trajectory(trajfile, atoms, qrot, angle)
 
     trajfile.close()
+
+    # Example Usage
+    points = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])  # Example points
+    normal = np.array([0, 0, 1])  # Normal vector
+    theta = np.pi / 4  # 45 degrees in radians
+
+    rotated = rotate_points(points, normal, theta)
+    print(rotated)
 
 
 

@@ -865,7 +865,8 @@ class Collision(Molecule):
         self.bimp_fin    = None
 
 
-    def Specify_Collision_Sampling(self, Rini=None, bmax=None, bsampling=False, Ecoll=None, Ecoll_thermal=False, temp=None):
+    def Specify_Collision_Sampling(self, Rini=None, bmax=None, bsampling=False, Ecoll=None, Ecoll_thermal=False, temp=None,
+                                   surface=False, surf_skew=None, surf_target=None):
 
         if Rini == None or bmax == None or (Ecoll == None and Ecoll_thermal==False) or (Ecoll_thermal==True and temp==None):
             raise ValueError("Rini, bmax and Ecoll (or Ecoll_thermal) must be give in the input of Specify_Collision_Sampling()")
@@ -885,6 +886,9 @@ class Collision(Molecule):
         self.Ecoll_thermal = Ecoll_thermal
         self.tempcoll = temp
         self.sampling_set = True
+        self.surface = surface
+        self.surf_skew = surf_skew 
+        self.surf_atom = surf_target
 
     def Set_Relative_Init_Coords(self):
 
@@ -920,6 +924,33 @@ class Collision(Molecule):
             jz = 3 * i + 2
             qB[jx] += sepx 
             qB[jz] += self.bimp 
+
+        if self.surface:
+            #rotate the surface to be in Y-Z plane (the normalvector of surface points toward X)
+
+            self.qA, self.qB = orient_surface(self.qA, self.pA)
+            self.qA, self.qB = random_rotate_in_YZ_plane(self.qA, self.pA)
+
+            #rotate with random angle in the yz-plane
+            '''        
+                    Z |
+                      |
+                      |
+                      |************ <---P (projectile)
+                      |                 |
+                  /\\\\\\\\             | bimp (b - impact param)
+                 /    |    \            | 
+                |     O-----|---------------------->
+                 \  /      /           sepx       X
+                  \\\\\\\\/            
+                  /          sepx = sqrt(R^2 - b^2)
+                 /
+                /
+               /
+              /  
+             Y
+
+            '''
 
         wA = self.fragment_A.totmass
         wB = self.fragment_B.totmass
