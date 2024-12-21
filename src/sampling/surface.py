@@ -105,7 +105,7 @@ def rodrigues_rotation_matrix(normal, theta):
     return Rmat
 
 def rotate_points(points, normal, theta):
-    R = rotation_matrix(normal, theta)
+    R = rodrigues_rotation_matrix(normal, theta)
     rotated_points = np.dot(points, R.T)  # Apply rotation matrix
     return rotated_points
 
