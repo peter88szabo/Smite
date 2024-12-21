@@ -2,4 +2,9 @@ peslib/*.f90 linguist-vendored
 peslib/*.f linguist-vendored
 peslib/*.for linguist-vendored
 
+# Alternatively, force Fortran files to be treated as Python for statistics
+*.py linguist-language=Python
+peslib/*.f90 linguist-language=Python
+peslib/*.f linguist-language=Python
+peslib/*.for linguist-language=Python
 
