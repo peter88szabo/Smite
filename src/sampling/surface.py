@@ -1,6 +1,59 @@
 import numpy as np
 import random
 
+
+def orient_and_rotate_surface(surf_3atom, lab_axis, phi, q, p, mass):
+    surf_normal = surface_normal(surf_3atom, q)
+    print()
+    print("surf_normal before orientation:", surf_normal)
+    print()
+
+   #we shif the molecule into its center of mass (it's the origin) 
+   #lab_axis is also describes the origin
+    q, p = cenmass(q, p, mass)
+
+    q, p = orient_surface(surf_3atom, lab_axis, q, p)
+
+    #new normal vector (Now this supposed to match the lab_axis)
+    surf_normal = surface_normal(surf_3atom, q)
+
+    print("from orient_and_rotate_surface()")
+    print("lab_axis:", lab_axis)
+    print("surf_normal after orientation:", surf_normal)
+    print()
+
+    q, p = rotate_surface(surf_normal, phi, q, p)
+
+    return q, p
+
+def orient_surface(surf_3atom, lab_axis, q, p):
+    '''
+    Rotate the surface to align (to be perpendicular)
+    to the chosen lab-fixed axis (the normalvector of the surface is aligned with the lab axis)
+    '''
+
+    R = rotmat_for_overlapping_vectors(surf_normal, lab_axis)
+
+    q = rotate_molecule_about_single_axis(R, q)
+    p = rotate_molecule_about_single_axis(R, p)
+
+    return q, p
+
+def rotate_surface(axis, phi, q, p):
+    '''
+    Rotate molecule about a single axis
+    using the Rodrigues rodation matrix
+    '''
+
+    R = rodrigues_rotation_matrix(axis, phi)
+
+    q = rotate_molecule_about_single_axis(R, q)
+    p = rotate_molecule_about_single_axis(R, p)
+
+    return q, p
+
+
+
 def surface_normal(ind, q):
     """
     Calculate the normalized surface normal vector given indices of three atoms and their coordinates.
@@ -45,18 +98,9 @@ def rotmat_for_overlapping_vectors(qA, qB):
     if len(qA) != len(qB):
         raise Exception("Error: qA and qB vector must have the same size in Rigid Rotation transformation")
 
-    #we shif both molecule into their center of mass (now both in the origin)
-    #qA = cenmassQ(qA, mass)
-    #qB = cenmassQ(qB, mass)
-
     # Convert q to a 3xN matrix
     coord_A = np.array(qA).reshape(3, -1)
     coord_B = np.array(qB).reshape(3, -1)
-
-    print()
-    print("coord_A: ", coord_A)
-    print("coord_B: ", coord_B)
-    print()
 
     num_rows, num_cols = coord_A.shape
     if num_rows != 3:
@@ -120,8 +164,10 @@ def rodrigues_rotation_matrix(axis, theta):
 
 def rotate_molecule_about_single_axis(R, q):
     '''
-    R: rotation matrix
-    theta : angle of rotation
+    R: rotation matrix 
+    q: vector of xyz coords
+
+    the function rotates coordinates atom-by-atom
     '''
 
     qrot = np.zeros_like(q)

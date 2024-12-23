@@ -573,7 +573,7 @@ class Fragment(Molecule):
 
     @classmethod
     def Polyatom_Init(cls, fname, qchem, xyz, nfix=0, linear=False, is_eckart=True, random_rot=True,
-            rigid=False, fromMD=False, surface=False, Amp_modeanim=30.0, print_nmode=True):
+            rigid=False, fromMD=False, surface=False, surf_3atom=None, Amp_modeanim=30.0, print_nmode=True):
 
         natom, atoms, q_eq = parseXYZ(xyz)
         q_eq = np.array(q_eq) / 0.52917721092  #Angstrom to Bohr
@@ -594,14 +594,14 @@ class Fragment(Molecule):
         this.qchem      = qchem
         this.rigid      = rigid
         this.surface    = surface
+        this.surf_3atom = surf_3atom 
+        this.random_rot = random_rot
+        this.linear     = linear
+        this.nfix       = nfix
+        this.fromMD     = fromMD
         if surface:
             this.random_rot = False
             this.linear     = False 
-        else
-            this.random_rot = random_rot
-            this.linear     = linear
-        this.nfix       = nfix
-        this.fromMD     = fromMD
        #--------------------------------------------------------------------
         if not rigid and not fromMD:
             hessFile = 'hessian_' + fname + '.hess'
@@ -784,8 +784,8 @@ class Fragment(Molecule):
             self.angmom   = angmom
 
 
-        #randomly rotate the molecule about its center of mass
-        if self.random_rot == True and self.surface == False:
+        #randomly rotate the molecule about its center of mass (surface is not rotated)
+        if self.random_rot and not self.surface:
             self.q, self.p = euler_rot(self.q, self.p)
 
         self.p = np.array(self.p)
@@ -873,7 +873,7 @@ class Collision(Molecule):
 
 
     def Specify_Collision_Sampling(self, Rini=None, bmax=None, bsampling=False, Ecoll=None, Ecoll_thermal=False, temp=None,
-                                   surface=False, surf_skew=None, surf_target=None):
+                                   surf_skew_max=180.0, surf_skew_fix=None, surf_target_atom=None, surf_side=1):
 
         if Rini == None or bmax == None or (Ecoll == None and Ecoll_thermal==False) or (Ecoll_thermal==True and temp==None):
             raise ValueError("Rini, bmax and Ecoll (or Ecoll_thermal) must be give in the input of Specify_Collision_Sampling()")
@@ -893,14 +893,15 @@ class Collision(Molecule):
         self.Ecoll_thermal = Ecoll_thermal
         self.tempcoll = temp
         self.sampling_set = True
-        self.surface = surface
-        self.surf_skew = surf_skew 
-        self.surf_atom = surf_target
+        self.surf_skew_fix = surf_skew_fix * math.pi / 180.0
+        self.surf_skew_max = surf_skew_max * math.pi / 180.0
+        self.surf_target_atom = surf_target_atom
+        self.surf_side = surf_side
 
     def Set_Relative_Init_Coords(self):
         '''
         The potato (molecule or surface) is aimed by the projectile
-        First its center of mass put into the origin
+        First its center of mass will be put into the origin
 
         If the potato is a surface then it's needed to be
         oriented in a proper way before collision
@@ -950,21 +951,16 @@ class Collision(Molecule):
             self.bimp = self.bmax * math.sqrt(random.uniform(0.0,1.0))
         else:
             self.bimp = self.bmax #fix impact parameter for opacity function P(b) calculations
-        sepx = math.sqrt(self.Rini * self.Rini - self.bimp*self.bimp)
 
-        #shift fragment B along the x-axis with sepx (separation along x-axis)
-        #and shifted along the z-axis with bimp(impact paramter)
-        for i in range(len(self.fragment_B.mass)):
-            jx = 3 * i
-            jy = 3 * i + 1
-            jz = 3 * i + 2
-            qB[jx] += sepx 
-            qB[jz] += self.bimp 
-
-        if self.surface:
+        #**************************************************************************************
+        #Either of the fragments is a surface:
+        #**************************************************************************************
+        if self.fragment_A.surface or self.fragment_B.surface:
             #-------------------------------------------------------
-            if self.surf_skew is None
+            if self.surf_skew_fix is None:
             #Random sampling of the skew angle for the projectile
+                theta_max = self.surf_skew_max
+
                 tmax = 1.0 - np.cos(theta_max)
 
                 rnd_skew = random.uniform(0, theta_max)
@@ -972,26 +968,58 @@ class Collision(Molecule):
                 theta_skew = np.arccos(1.0 - rnd_skew * tmax)
             else: 
             #Fix skew angle for the projectile
-                theta_skew = self.surf_skew
+                theta_skew = self.surf_skew_fix
            #-------------------------------------------------------
             #rotate with random angle in the yz-plane
             phi_yz = random.uniform(0, 2 * math.pi)
            #-------------------------------------------------------
 
-            #rotate the surface to be in Y-Z plane (the normalvector of surface points toward X)
-            axis = np.array([1.0, 0.0, 0.0]) # X-axis
+            #rotate the surface into the Y-Z plane (the normalvector of surface points toward X)
+            #self.surf_side to chose which side of the surface (by default self.surf_side = 1)
+            lab_axis = np.array([1.0, 0.0, 0.0]) * self.surf_side # X-axis
 
-            self.qA, self.qB = orient_surface(axis, self.qA, self.pA)
-            self.qA, self.qB = random_rotate_surface(axis, phi_yz, self.qA, self.pA)
+            if self.fragment_A.surface:
+                surf_3atom = self.fragment_A.surf_3atom  #3 atoms that define the surface
+
+                qA, pA = orient_and_rotate_surface(surf_3atom, lab_axis, phi_yz, self.fragment_A.q, self.fragment_A.p, self.fragment_A.mass)
+
+            if self.fragment_B.surface:
+                surf_3atom = self.fragment_B.surf_3atom #3 atoms that define the surface
+
+                qB, pB = orient_and_rotate_surface(surf_3atom, lab_axis, phi_yz, self.fragment_B.q, self.fragment_B.p, self.fragment_B.mass)
+        #**************************************************************************************
+
+        #Rini is the initial separation of center of masses
+        #while sepx is the separation along the X-axis where the attack happens
+        sepx = math.sqrt(self.Rini * self.Rini - self.bimp*self.bimp)
 
         wA = self.fragment_A.totmass
         wB = self.fragment_B.totmass
 
         redmass = wA*wB/(wA+wB)
 
+        #velocity is distributed in a center of mass system
         velRel = math.sqrt(2.0*self.Ecoll/redmass)
         velA = velRel*wB / (wA+wB)
         velB = velA - velRel
+
+        #shift fragment B along the x-axis with sepx (separation along x-axis)
+        #and shifted along the z-axis with bimp(impact paramter)
+        if self.fragment_B.surface: #in case of fragment-B is the surface then the smaller projectile is shifted 
+            for i in range(len(self.fragment_B.mass)):
+                jx = 3 * i
+                jy = 3 * i + 1
+                jz = 3 * i + 2
+                qA[jx] += sepx
+                qA[jz] += self.bimp
+        else: #in case of a normal molecule-molecule scattering or when fragment-A is the surface:
+            for i in range(len(self.fragment_B.mass)):
+                jx = 3 * i
+                jy = 3 * i + 1
+                jz = 3 * i + 2
+                qB[jx] += sepx
+                qB[jz] += self.bimp
+
 
         #it has only velocity along the X-axis
         for i in range(len(self.fragment_A.mass)):
@@ -1001,6 +1029,8 @@ class Collision(Molecule):
         for i in range(len(self.fragment_B.mass)):
             jx = 3 * i
             pB[jx] += velB * self.fragment_B.mass[i]
+
+
 
 
         self.q = np.append(qA, qB)
