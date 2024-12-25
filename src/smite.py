@@ -874,7 +874,7 @@ class Collision(Molecule):
 
 
     def Specify_Collision_Sampling(self, Rini=None, bmax=None, bsampling=False, Ecoll=None, Ecoll_thermal=False, temp=None,
-                                   surf_skew_max=180.0, surf_skew_fix=None, surf_target_atom=None, surf_side=1):
+                                   surf_skew_max=90.0, surf_skew_fix=None, surf_target_atom=None, surf_side=1):
 
         if Rini == None or bmax == None or (Ecoll == None and Ecoll_thermal==False) or (Ecoll_thermal==True and temp==None):
             raise ValueError("Rini, bmax and Ecoll (or Ecoll_thermal) must be give in the input of Specify_Collision_Sampling()")
@@ -895,8 +895,7 @@ class Collision(Molecule):
         self.tempcoll = temp
         self.sampling_set = True
         self.surf_skew_max = surf_skew_max * math.pi / 180.0
-        if surf_skew_fix is not None:
-            self.surf_skew_fix = surf_skew_fix * math.pi / 180.0
+        self.surf_skew_fix = surf_skew_fix 
         self.surf_target_atom = surf_target_atom
         self.surf_side = surf_side
 
@@ -1034,7 +1033,7 @@ class Collision(Molecule):
         if self.Ecoll == None or self.bmax == None or self.Rini == None:
             raise ValueError("Ecoll (unless it's thermall sampled), bmax and Rini must be given in the input of Set_Relative_Init_Coords()")
 
-        if self.Rini < self.bimp:
+        if self.Rini < self.bmax:
             raise ValueError("Error: Rini must be larger than b (impact paremter) for surface collisions")
 
         if self.bsampling:
@@ -1053,13 +1052,16 @@ class Collision(Molecule):
             rnd_skew = random.uniform(0, theta_max)
 
             theta_skew = np.arccos(1.0 - rnd_skew * ctmax)
+
         else: 
         #Fix skew angle for the projectile (given as input)
-            theta_skew = self.surf_skew_fix
-
+            theta_skew = self.surf_skew_max
         #-------------------------------------------------------
+
+
         #rotate with random angle in the yz-plane
         phi_yz = random.uniform(0, 2 * math.pi)
+        print("surface rotation angele (phi_yz): ", phi_yz)
         #-------------------------------------------------------
 
         #rotate the surface into the Y-Z plane (the normalvector of surface points toward X)
@@ -1082,7 +1084,10 @@ class Collision(Molecule):
 
         #shift fragment B along the x-axis with sepx (separation along x-axis)
         #and shifted along the z-axis with bimp(impact paramter)
+        
         if self.fragment_B.surface and not self.fragment_A.surface: #in case of fragment-B is the surface then the smaller projectile is shifted 
+            print("Fragment B is the surface")
+            print("theta_skew: ",  theta_skew * 180.0 / math.pi)
 
             velA = math.sqrt(2.0*self.Ecoll/self.fragment_A.totmass) #only Fragment-A is flying toward the surface (Fragment-B)
 
@@ -1093,10 +1098,12 @@ class Collision(Molecule):
                 qA[jx] += self.Rini * np.cos(theta_skew)
                 qA[jz] += self.Rini * np.sin(theta_skew) + self.bimp
 
-                pA[jx] += velA * np.cos(theta_skew) * self.fragment_A.mass[i]
-                pA[jz] += velA * np.sin(theta_skew) * self.fragment_A.mass[i]
+                pA[jx] += -velA * np.cos(theta_skew) * self.fragment_A.mass[i]
+                pA[jz] += -velA * np.sin(theta_skew) * self.fragment_A.mass[i]
 
         elif self.fragment_A.surface and not self.fragment_B.surface: #in case of a normal molecule-molecule scattering or when fragment-A is the surface:
+            print("Fragment A is the surface")
+            print("theta_skew: ",  theta_skew * 180.0 / math.pi)
 
             velB = math.sqrt(2.0*self.Ecoll/self.fragment_B.totmass) #only Fragment-B is flying toward the surface (Fragment-A)
 
@@ -1107,8 +1114,8 @@ class Collision(Molecule):
                 qB[jx] += self.Rini * np.cos(theta_skew)
                 qB[jz] += self.Rini * np.sin(theta_skew) + self.bimp
 
-                pB[jx] += velB * np.cos(theta_skew) * self.fragment_B.mass[i]
-                pB[jz] += velB * np.sin(theta_skew) * self.fragment_B.mass[i]
+                pB[jx] += -velB * np.cos(theta_skew) * self.fragment_B.mass[i]
+                pB[jz] += -velB * np.sin(theta_skew) * self.fragment_B.mass[i]
 
         else:
             raise ValueError("Error: Fragment A or B must be a surface!!!")
@@ -1157,7 +1164,7 @@ class Collision(Molecule):
 
 
         if self.fragment_A.surface or self.fragment_B.surface:
-            self.Set_Relative_Init_Surface()
+            self.Set_Relative_Init_Coords_Surface()
         else:
             self.Set_Relative_Init_Coords_Molecule()
 

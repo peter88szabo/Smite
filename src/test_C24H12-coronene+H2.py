@@ -105,7 +105,7 @@ H            1.84733040367093        5.68965953045204       -1.13705408554768
     'wfu': False
     }
 
-    seed = 12579112
+    seed = 14579112
     random.seed(seed)
 
 
@@ -121,7 +121,7 @@ H            1.84733040367093        5.68965953045204       -1.13705408554768
 
     fix_quantum_C24H12 = [(0, 6)]
 
-    C24H12  = Fragment.Polyatom_Init(fname='C24H12', qchem=qcinput_singlet, xyz=xyz_C24H12, random_rot=True)
+    C24H12  = Fragment.Polyatom_Init(fname='C24H12', qchem=qcinput_singlet, xyz=xyz_C24H12, surface=True, surf_3atom=[0, 13, 19])
     C24H12.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0)
 
 
@@ -146,7 +146,7 @@ H            1.84733040367093        5.68965953045204       -1.13705408554768
     print("\nReaction of C24H12 + H2\n")
 
     reaction = Collision(C24H12, H2, qchem=qcinput_singlet) 
-    reaction.Specify_Collision_Sampling(Rini=10.0, bmax=0.0, bsampling=True, Ecoll_thermal=True, temp=50.0)
+    reaction.Specify_Collision_Sampling(Rini=10.0, bmax=3.0, bsampling=True, Ecoll_thermal=True, temp=1000.0, surf_skew_max=45.0, surf_skew_fix=True, surf_side=1)
 
     reaction.sample_and_run_collision(integrator='leapfrog', integrator_order=4, timestep=0.7, maxstep=10000, iprint=2, pairs_to_stop=pairs_to_test)
 
