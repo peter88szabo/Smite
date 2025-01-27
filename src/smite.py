@@ -84,6 +84,7 @@ class Molecule:
         self.tini       = None
         self.vsave      = []
 
+
     def save_velocity_and_distance_matrix(self):
         #mass weighted velcity u = M^1/2 * v
         #each element of the list is mass weigthed velocity vector corresponding to a timestep
@@ -484,6 +485,11 @@ class Molecule:
         if os.path.exists(folder_name) and os.path.isdir(folder_name):
             shutil.rmtree(folder_name)
 
+    def init_qchem_interface(self):
+        if self.qchem['qchem'] in {'PySCF', 'XTB', 'Sparrow_bin', 'Sparrow_Py'}:
+            nproc = self.qchem['nproc']
+            os.environ['OMP_NUM_THREADS'] = str(nproc)
+
 
 
 class Fragment(Molecule):
@@ -602,6 +608,11 @@ class Fragment(Molecule):
         this.linear     = linear
         this.nfix       = nfix
         this.fromMD     = fromMD
+
+        #set the number of processors if not Orca used as qchem
+        #this.init_qchem_interface()
+
+
         if surface:
             this.random_rot = False
             this.linear     = False 

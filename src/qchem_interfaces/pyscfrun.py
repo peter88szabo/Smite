@@ -72,7 +72,7 @@ def PySCF_Energy(filename, q, atoms, qcinput):
     return E
 
 def PySCF_Hessian(Natoms, xyz, qcinput):
-    from pyscf       import gto, dft
+    from pyscf       import gto, dft, hessian
 
     functional   =   qcinput['functional']
     basis        =   qcinput['basis']
@@ -94,4 +94,13 @@ def PySCF_Hessian(Natoms, xyz, qcinput):
     h = mf.Hessian().kernel()
     hess = h.transpose(0,2,1,3).reshape(Natoms*3,Natoms*3)
     return hess
+
+
+    # Compute the analytical Hessian
+    #hessian_calculator = hessian.RKS(mf) if multiplicity == 1 else hessian.UKS(mf)
+    #h = hessian_calculator.kernel()
+
+    # Reshape the Hessian to a 2D matrix
+    #hess = h.transpose(0, 2, 1, 3).reshape(Natoms * 3, Natoms * 3)
+    #return hess
 

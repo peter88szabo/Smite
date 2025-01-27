@@ -65,13 +65,17 @@ if __name__ == '__main__':
     'qchem': 'PySCF',
     'path': '',
     'nproc': 4,
-    'functional': 'PBE',
-    'basis': 'sto-3g',
+    'functional': 'B3LYP',
+    'basis': 'pc1',
     'charge': 0,
-    'multiplicity': 1,
+    'multiplicity': 2,
     'additional': '',
-    'wfu': True
+    'wfu': False
     }
+
+    import os
+    nproc = qcinput_PySCF['nproc']
+    os.environ['OMP_NUM_THREADS'] = str(nproc)
     
     qcinput_Sparrow_bin = {
     'qchem': 'Sparrow_bin',

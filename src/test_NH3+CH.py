@@ -54,17 +54,34 @@ if __name__ == '__main__':
     'wfu': False
     }
 
-    qcinput_PySCF = {
+    qcinput_PySCF_singlet = {
     'qchem': 'PySCF',
     'path': '',
     'nproc': 4,
-    'functional': 'PBE',
+    'functional': 'wb97x',
     'basis': 'sto-3g',
     'charge': 0,
     'multiplicity': 1,
-    'additional': '',
-    'wfu': True
+     'additional': '',
+    'wfu': False
     }
+
+
+    qcinput_PySCF_doublet = {
+    'qchem': 'PySCF',
+    'path': '',
+    'nproc': 4,
+    'functional': 'wb97x',
+    'basis': 'sto-3g',
+    'charge': 0,
+    'multiplicity': 2,
+     'additional': '',
+    'wfu': False
+    }
+
+    import os
+    nproc = qcinput_PySCF_singlet['nproc']
+    os.environ['OMP_NUM_THREADS'] = str(nproc)
     
     qcinput_Sparrow_bin = {
     'qchem': 'Sparrow_bin',
@@ -92,7 +109,7 @@ if __name__ == '__main__':
     random.seed(seed)
 
 
-    NH3  = Fragment.Polyatom_Init(fname='NH3', qchem=qcinput_singlet, xyz=xyz_NH3, random_rot=True)
+    NH3  = Fragment.Polyatom_Init(fname='NH3', qchem=qcinput_PySCF_singlet, xyz=xyz_NH3, random_rot=True)
     #zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
     #zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Temp', temp=300.0)
     NH3.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10)
@@ -118,7 +135,7 @@ if __name__ == '__main__':
 
     print("\nReaction of NH3 + CH\n")
 
-    reaction =  Collision(NH3, CH, qchem=qcinput_doublet) 
+    reaction =  Collision(NH3, CH, qchem=qcinput_PySCF_doublet) 
     reaction.Specify_Collision_Sampling(Rini=6.0, bmax=5.0, bsampling=True, Ecoll_thermal=True, temp=100.0)
 
     reaction.sample_and_run_collision(integrator='leapfrog', integrator_order=4, timestep=0.7, maxstep=10000, iprint=4, pairs_to_stop=pairs_to_test)
