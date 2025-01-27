@@ -31,6 +31,7 @@ from sampling.thermal             import thermal_collision_energy
 from sampling.diatom              import diatom_rotation_rigidrot_sampling
 from sampling.diatom              import diatom_vibration_harmonic_sampling 
 from sampling.surface             import orient_and_rotate_surface
+from sampling.surface             import rotate_about_axis 
 
 
 from integrators.stormerverlet    import stormer_verlet
@@ -328,10 +329,10 @@ class Molecule:
                             tstop = test_to_stop_general(q=self.q, tol=self.Rstop)
                             channel = 'Not Specified'
 
-                        print(f"step: {istep:<10d} t[fs]: {istep*dt/c6:<12.1f} V[Eh]: {(V-self.vref):<16.6f} E[Eh]: {(E-self.vref):<16.6f} dE[kJ]: {dE*c7:16.3f}    T[K]: {act_temp:10.1f} Rcom[A]: {Rcom_actual*b2a:8.2f}")
+                        print(f"step: {istep:<10d} t[fs]: {istep*dt/c6:<12.1f} V[Eh]: {(V-self.vref):<16.6f} E[Eh]: {(E-self.vref):<16.6f} dE[kJ]: {dE*c7:16.3f}    T[K]: {act_temp:10.1f} Rcom[A]: {Rcom_actual*b2a:8.2f}", flush=True)
 
                     else: #if not collision (just unimolecular dynamics) then we can ran the test anytime
-                        print(f"step: {istep:<10d} t[fs]: {istep*dt/c6:<12.2f}  V[Eh]: {V:<16.6f} E[Eh]: {E:<16.6f} dE[kJ]: {dE*c7:16.3f}     T[K]: {act_temp:<10.1f}")
+                        print(f"step: {istep:<10d} t[fs]: {istep*dt/c6:<12.2f}  V[Eh]: {V:<16.6f} E[Eh]: {E:<16.6f} dE[kJ]: {dE*c7:16.3f}     T[K]: {act_temp:<10.1f}", flush=True)
                         if self.pairstop is not None and self.Rstop is None:
                             tstop, channel = test_to_stop_specific(q=self.q, pairs_to_test=self.pairstop)
                         elif self.pairstop is None and self.Rstop is not None:
@@ -472,6 +473,7 @@ class Molecule:
             jy = 3*i+1
             jz = 3*i+2
             trajfile.write("%3s %15.5f  %15.5f %15.5f  %16.6f  %16.6f %16.6f\n" % (self.atoms[i], self.q[jx]*b2a, self.q[jy]*b2a, self.q[jz]*b2a, self.p[jx], self.p[jy], self.p[jz]))
+        trajfile.flush()
 
     def delete_orca_tmp(self):
         import os
@@ -959,7 +961,6 @@ class Collision(Molecule):
             qB[jx] += sepx
             qB[jz] += self.bimp
 
-
         wA = self.fragment_A.totmass
         wB = self.fragment_B.totmass
 
@@ -1060,8 +1061,10 @@ class Collision(Molecule):
 
 
         #rotate with random angle in the yz-plane
-        phi_yz = random.uniform(0, 2 * math.pi)
-        print("surface rotation angele (phi_yz): ", phi_yz)
+        phi_yz_surf = random.uniform(0, 2 * math.pi)
+        phi_yz_proj = random.uniform(0, 2 * math.pi)
+        print("surface rotation angle: ", phi_yz_surf*180.0/math.pi)
+        print("projectile rotation angle: ", phi_yz_proj*180.0/math.pi)
         #-------------------------------------------------------
 
         #rotate the surface into the Y-Z plane (the normalvector of surface points toward X)
@@ -1071,12 +1074,12 @@ class Collision(Molecule):
         if self.fragment_A.surface:
             surf_3atom = self.fragment_A.surf_3atom  #3 atoms that define the surface
 
-            qA, pA = orient_and_rotate_surface(surf_3atom, lab_axis, phi_yz, qA, pA, self.fragment_A.mass)
+            qA, pA = orient_and_rotate_surface(surf_3atom, lab_axis, phi_yz_surf, qA, pA, self.fragment_A.mass)
 
         if self.fragment_B.surface:
             surf_3atom = self.fragment_B.surf_3atom #3 atoms that define the surface
 
-            qB, pB = orient_and_rotate_surface(surf_3atom, lab_axis, phi_yz, qB, pB, self.fragment_B.mass)
+            qB, pB = orient_and_rotate_surface(surf_3atom, lab_axis, phi_yz_surf, qB, pB, self.fragment_B.mass)
         #**************************************************************************************
 
         #Rini is the initial separation of center of masses of the aiming point and the center of mass of the projectile molecule
@@ -1085,21 +1088,26 @@ class Collision(Molecule):
         #shift fragment B along the x-axis with sepx (separation along x-axis)
         #and shifted along the z-axis with bimp(impact paramter)
         
+
         if self.fragment_B.surface and not self.fragment_A.surface: #in case of fragment-B is the surface then the smaller projectile is shifted 
             print("Fragment B is the surface")
             print("theta_skew: ",  theta_skew * 180.0 / math.pi)
 
             velA = math.sqrt(2.0*self.Ecoll/self.fragment_A.totmass) #only Fragment-A is flying toward the surface (Fragment-B)
 
+
             for i in range(len(self.fragment_A.mass)):
                 jx = 3 * i
                 jy = 3 * i + 1
                 jz = 3 * i + 2
-                qA[jx] += self.Rini * np.cos(theta_skew)
+                qA[jx] += self.Rini * np.cos(theta_skew) 
                 qA[jz] += self.Rini * np.sin(theta_skew) + self.bimp
 
                 pA[jx] += -velA * np.cos(theta_skew) * self.fragment_A.mass[i]
                 pA[jz] += -velA * np.sin(theta_skew) * self.fragment_A.mass[i]
+
+            #shift_lab_axis = np.array([1.0, 0.0, self.bimp]) 
+            #qA, pA = rotate_about_axis(shift_lab_axis, phi_yz_proj, qA, pA)
 
         elif self.fragment_A.surface and not self.fragment_B.surface: #in case of a normal molecule-molecule scattering or when fragment-A is the surface:
             print("Fragment A is the surface")
@@ -1111,11 +1119,14 @@ class Collision(Molecule):
                 jx = 3 * i
                 jy = 3 * i + 1
                 jz = 3 * i + 2
-                qB[jx] += self.Rini * np.cos(theta_skew)
-                qB[jz] += self.Rini * np.sin(theta_skew) + self.bimp
+                qB[jx] += self.Rini * np.cos(theta_skew) 
+                qB[jz] += self.Rini * np.sin(theta_skew) + self.bimp 
 
                 pB[jx] += -velB * np.cos(theta_skew) * self.fragment_B.mass[i]
                 pB[jz] += -velB * np.sin(theta_skew) * self.fragment_B.mass[i]
+
+            #shift_lab_axis = np.array([1.0, 0.0, self.bimp]) 
+            #qB, pB = rotate_about_axis(shift_lab_axis, phi_yz_proj, qB, pB)
 
         else:
             raise ValueError("Error: Fragment A or B must be a surface!!!")

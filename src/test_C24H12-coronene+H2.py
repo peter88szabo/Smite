@@ -105,7 +105,7 @@ H            1.84733040367093        5.68965953045204       -1.13705408554768
     'wfu': False
     }
 
-    seed = 14579112
+    seed = 12989162
     random.seed(seed)
 
 
@@ -139,15 +139,15 @@ H            1.84733040367093        5.68965953045204       -1.13705408554768
 
 
     pairs_to_test = {
-    'Nonreactive': [((0, 37), 'GT', 14.0)],
+    'Nonreactive': [((0, 37), 'GT', 12.0)],
     # add more channels and pairs as needed
     }
 
     print("\nReaction of C24H12 + H2\n")
 
     reaction = Collision(C24H12, H2, qchem=qcinput_singlet) 
-    reaction.Specify_Collision_Sampling(Rini=10.0, bmax=3.0, bsampling=True, Ecoll_thermal=True, temp=1000.0, surf_skew_max=45.0, surf_skew_fix=True, surf_side=1)
+    reaction.Specify_Collision_Sampling(Rini=10.0, bmax=1.0, bsampling=True, Ecoll_thermal=True, temp=1000.0, surf_skew_max=0.0, surf_skew_fix=True, surf_side=1)
 
-    reaction.sample_and_run_collision(integrator='leapfrog', integrator_order=4, timestep=0.7, maxstep=10000, iprint=2, pairs_to_stop=pairs_to_test)
+    reaction.sample_and_run_collision(integrator='leapfrog', integrator_order=4, timestep=0.7, maxstep=10000, iprint=5, pairs_to_stop=pairs_to_test)
 
 

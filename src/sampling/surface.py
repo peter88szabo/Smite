@@ -1,5 +1,7 @@
+import math
 import numpy as np
 import random
+from utils.cenmass import cenmass, cenmassQ
 
 
 def orient_and_rotate_surface(surf_3atom, lab_axis, phi, q, p, mass):
@@ -12,7 +14,7 @@ def orient_and_rotate_surface(surf_3atom, lab_axis, phi, q, p, mass):
    #lab_axis is also describes the origin
     q, p = cenmass(q, p, mass)
 
-    q, p = orient_surface(surf_3atom, lab_axis, q, p)
+    q, p = orient_surface(surf_normal, lab_axis, q, p)
 
     #new normal vector (Now this supposed to match the lab_axis)
     surf_normal = surface_normal(surf_3atom, q)
@@ -22,11 +24,11 @@ def orient_and_rotate_surface(surf_3atom, lab_axis, phi, q, p, mass):
     print("surf_normal after orientation:", surf_normal)
     print()
 
-    q, p = rotate_surface(surf_normal, phi, q, p)
+    q, p = rotate_about_axis(surf_normal, phi, q, p)
 
     return q, p
 
-def orient_surface(surf_3atom, lab_axis, q, p):
+def orient_surface(surf_normal, lab_axis, q, p):
     '''
     Rotate the surface to align (to be perpendicular)
     to the chosen lab-fixed axis (the normalvector of the surface is aligned with the lab axis)
@@ -39,7 +41,7 @@ def orient_surface(surf_3atom, lab_axis, q, p):
 
     return q, p
 
-def rotate_surface(axis, phi, q, p):
+def rotate_about_axis(axis, phi, q, p):
     '''
     Rotate molecule about a single axis
     using the Rodrigues rodation matrix
@@ -87,7 +89,6 @@ def surface_normal(ind, q):
 
 
 def rotmat_for_overlapping_vectors(qA, qB):
-    #from utils.cemass import cenmassQ
     '''
     Find the optimal overlap between two 3*N dimensional vector
     using Least-Square fitting that results in SVD transformation
@@ -287,19 +288,17 @@ H            5.26954348044517        0.14192510040879       0.00000000
     mN = 14.007*c3
     mO = 15.999*c3
 
-    Natoms, atoms, q_eq = parseXYZ(xyz_C48H18)
+    Natoms, atoms_PAH, q_eq = parseXYZ(xyz_C48H18)
 
     q = q_eq / 0.52917721092
 
-    mass = get_mass_vector(atoms)
+    mass = get_mass_vector(atoms_PAH)
+
+    q = cenmassQ(q, mass)
 
     angle = 90.0
 
-    trajfile = open('testfile.xyz', 'w')  
         
-    print_trajectory(trajfile, atoms, q, angle)
-
-
 
     ind = [9, 20, 22]
     normalvec = surface_normal(ind, q)
@@ -307,40 +306,72 @@ H            5.26954348044517        0.14192510040879       0.00000000
     print("normalvec: ", normalvec)
     print()
 
-    basis = np.array([1.0, 0.0, 0.0]) 
+    lab_axis = np.array([1.0, 0.0, 0.0]) 
 
-    print("basis: ", basis)
+    print("lab_axis: ", lab_axis)
 
+    R = rotmat_for_overlapping_vectors(normalvec, lab_axis)
 
-    R = rotmat_for_overlapping_vectors(normalvec, basis)
+    qA = rotate_molecule_about_single_axis(R, q)
 
-    print("\nRotmat:")
-    print(R)
-    print()
-
-    qrot = np.zeros_like(q)  
-    for i in range(len(q) // 3):
-        qatom = np.array([q[3 * i], q[3 * i + 1], q[3 * i + 2]])
-        qatom_rot = R @ qatom  # Rotate the atom's coordinates
-        qrot[3 * i:3 * i + 3] = qatom_rot  
-
-    normalvec = surface_normal(ind, qrot)
+    normalvec = surface_normal(ind, qA)
     print("Rot normalvec: ", normalvec)
 
 
-    angle = 90.0
-    print_trajectory(trajfile, atoms, qrot, angle)
+
+    xyz_H2 = '''
+    H      0.0    0.0   0.9
+    H      0.0    0.0   0.0
+    '''
+    H2_natoms, H2_atoms, H2_q_eq = parseXYZ(xyz_H2)
+    mass_H2 = get_mass_vector(H2_atoms)
+    qH2 = H2_q_eq / 0.52917721092
+
+    qH2 = cenmassQ(qH2, mass_H2)
+
+
+    theta_vec = np.linspace(0, np.pi/2.0, 20)
+    phi_vec = np.linspace(0, 2*np.pi, 36)
+    bimp = 3.0 / 0.52917721092
+    Rini = 12.0 / 0.52917721092
+
+    atoms_all = atoms_PAH + H2_atoms
+
+    trajfile = open('testfile.xyz', 'w')  
+    trajfile_phi = open('phi_testfile.xyz', 'w')  
+
+    for ang in theta_vec:
+        qB = qH2.copy()
+        for i in range(len(qB)//3):
+            jx = 3 * i
+            jy = 3 * i + 1
+            jz = 3 * i + 2
+            qB[jx] += Rini * np.cos(ang)
+            qB[jz] += Rini * np.sin(ang) + bimp
+
+        qall = np.append(qA, qB)
+        print_trajectory(trajfile, atoms_all, qall, ang)
+
+    pB = qB.copy()
+    ang = 30.0 * math.pi/180.0
+    for phi in phi_vec:
+        qB = qH2.copy()
+        for i in range(len(qB)//3):
+            jx = 3 * i
+            jy = 3 * i + 1
+            jz = 3 * i + 2
+            qB[jx] += Rini * np.cos(ang)
+            qB[jz] += Rini * np.sin(ang) + bimp
+
+        shift_lab_axis = np.array([1.0, 0.0, 0.0])
+        qB, pB = rotate_about_axis(shift_lab_axis, phi, qB, pB)
+
+        qall = np.append(qA, qB)
+        print_trajectory(trajfile_phi, atoms_all, qall, ang)
+
 
     trajfile.close()
-
-    # Example Usage
-    points = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])  # Example points
-    normal = np.array([0, 0, 1])  # Normal vector
-    theta = np.pi / 4  # 45 degrees in radians
-
-    rotated = rotate_points(points, normal, theta)
-    print(rotated)
-
+    trajfile_phi.close()
 
 
 
