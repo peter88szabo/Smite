@@ -206,7 +206,7 @@ def polyatom_rotation_sampling(rot_modes, mass, q, p):
 
     #calculate angular velocities (w) from the inverse of intertia tensor
     # I * w = L   --->  I(-1) * L = w
-    angvel = -np.matmul(Iinv, np.transpose(am_corrected))
+    angvel = np.matmul(Iinv, np.transpose(am_corrected))
 
     #Add rotational momentum to the vibrational one
     p = add_rotational_momentum(angvel, mass, q, p)
