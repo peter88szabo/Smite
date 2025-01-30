@@ -1216,3 +1216,35 @@ class Collision(Molecule):
                             iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=restart,
                             collision=True, Rstop=Rstop, pairs_to_stop=pairs_to_stop, spectrum=spectrum)
 
+    def multitraj_sample_and_run_collision(self, ntraj=1, integrator='verlet', integrator_order=4, timestep=1.0, startstep=0, maxstep=100, iprint=2,
+                                      traj_file=None, backfile=None, restart=False, pairs_to_stop=None, Rstop=None, spectrum=False, **kwargs):
+
+
+
+        if traj_file is None:
+            traj_file = 'traj_' + self.fragment_A.fname + '_+_' + self.fragment_B.fname + '.xyz'
+
+        if backfile is None:
+            backfile = 'backup_' + self.fragment_A.fname + '_+_' + self.fragment_B.fname + '.xyz'
+
+        if pairs_to_stop is None and Rstop is None:
+            raise ValueError("\nEither Rstop or pairs_to_stop must be given in the input")
+
+
+        for itraj in range(ntraj):
+            traj_file += str(itraj) + "_" 
+            backfile += "traj_" + str(itraj) + "_" 
+
+            #here we should open a specific directory then run the single traj there
+            # as traj_122
+            #    traj_123
+            #Amit meg meg kell oldalni, hogy a orca_tmp-t vagy mas tmp-t is odategyuk
+            #meg a vibracios filokat is
+            # meg masoljuk a hessiant be ebbe a file-ba
+            self.Sample_Bimolecular_Reactants(**kwargs)
+
+            self.run_trajectory(integrator=integrator, integrator_order=integrator_order, timestep=timestep, startstep=startstep, maxstep=maxstep,
+                                iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=restart,
+                                collision=True, Rstop=Rstop, pairs_to_stop=pairs_to_stop, spectrum=spectrum)
+
+

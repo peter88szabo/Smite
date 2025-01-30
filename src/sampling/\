@@ -60,9 +60,9 @@ def calcI(qq, w):
         [Ixz, Iyz, Izz]
         ])
     #principial axis and eigenvalues
-    Ixyz, dontneed = np.linalg.eigh(I)
+    ai, dontneed = np.linalg.eigh(I)
     Iinv = np.linalg.inv(I)
-    return (Ixyz, Iinv)
+    return (ai, Iinv)
 
 
 
@@ -153,9 +153,9 @@ def initialize_rotational_modes(init_rot_type='Jfix', temp=300.0, jrot=0, krot=0
 
 def polyatom_rotation_sampling(rot_modes, mass, q, p):
 
-    #Ixyz: principial moment inertia
+    #ai: principial moment inertia
     #Iinv : inverse of the intertia tensor
-    Ixyz,Iinv = calcI(q, mass)
+    ai,Iinv = calcI(q, mass)
 
     #---------------------------------------------------------------------------------------
     #obtain a rotational quantum number (fixed J, fixed energy or thermal sampling)
@@ -163,44 +163,36 @@ def polyatom_rotation_sampling(rot_modes, mass, q, p):
     sampling_mode = rot_modes[0][0] # it must be 'Q', 'E', 'T'
     excitation = rot_modes[0][1] #it's either the Jrot quantum number, energy or temperature
 
-    print("\n-------------------------------------------------------------------------")
-    print(f"Polyatomic Rotational Sampling:")
     if sampling_mode == 'Q':
-        print(f"Fix Quantum Number:")
-        print(f"Jrot = {excitation}")
         jrot = excitation
         amrot = math.sqrt(jrot * (jrot + 1))
+    elif sampling_mode == 'T':
+        RT = Rgas * excitation #excitation is the temperature here
+        print()
+        print("temp: ", excitation)
+        print("RT[kJ]: ", RT*c7)
+        print("ai:", ai)
+        print()
+        amrot = thermal_rot_asymmetric_top_equipart(RT, ai) 
+    else:
+        raise ValueError("sampling_mode must be 'Q', 'T'")
+    #---------------------------------------------------------------------------------------
 
-        #set random direction for angular momentum
-        theta = random.uniform(0, math.pi)
-        phi =  random.uniform(0, 2*math.pi)
 
-        am = np.array([
+
+    #set random direction for angular momentum
+    theta = random.uniform(0, math.pi)
+    phi =  random.uniform(0, 2*math.pi)
+
+    am = np.array([
             amrot*sin(theta)*cos(phi),
             amrot*sin(theta)*sin(phi),
             amrot*cos(theta)
          ])
 
-    elif sampling_mode == 'T':
-        print(f"Thermal Sampling:")
-        print(f"Temp = {excitation:>12.2f} K")
-        print(f"Angular momentum has been sampled directly (not the quantum number)")
-        print(f"w.r.t a symmetric top (oblate or prolate)")
 
-        RT = Rgas * excitation #excitation is the temperature here
-       #am = thermal_rot_asymmetric_top_equipart(RT, Ixyz) 
-        am = thermal_rot_symmetric_top(RT,Ixyz)
-        am_abs = np.linalg.norm(am)
-        print(f"Princ. Mom. Inertia = [{Ixyz[0]:<12.5f} {Ixyz[1]:>12.5f} {Ixyz[2]:>12.5f}] a.u.")
-        print(f"Angmom =  [{am[0]:<12.5f} {am[1]:>12.5f} {am[2]:>12.5f}] a.u.")
-        print(f"Angmom_abs = {am_abs:>12.5f} a.u.")
-    else:
-        raise ValueError("sampling_mode must be 'Q', 'T'")
-    #---------------------------------------------------------------------------------------
-
-    Erot = sum([am[i]**2/Ixyz[i]/2.0 for i in range(len(am))])
-    print(f"Erot = {Erot*c5:>12.2f} cm-1  {Erot*c7:>12.3f} kJ/mol  {Erot*c4:>12.5f} eV")
-    print("-------------------------------------------------------------------------\n")
+    #Erot = sum([am[i]**2/ai[i]/2.0 for i in range(len(am))])
+    #print("Erot[cm-1] =" , Erot*c5, "  Erot[eV] =", Erot*c4)
 
     am_corrected = angmom_correction_after_vibrational_sampling(am, q, p)
 
@@ -211,5 +203,5 @@ def polyatom_rotation_sampling(rot_modes, mass, q, p):
     #Add rotational momentum to the vibrational one
     p = add_rotational_momentum(angvel, mass, q, p)
 
-    return (p, am, Ixyz)
+    return (p, am, ai)
 #asd

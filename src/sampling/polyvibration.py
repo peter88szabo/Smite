@@ -128,11 +128,14 @@ def polyatom_vibration_sampling(mass, atoms, q_eq, ww, L, vib_modes, **kwargs):
 
     energy = []
     nvib = []
+    freq_mode = np.zeros_like(ww)
     #the main loop running over the normal modes
+    print("\nVibrational quantum number of sampled modes (freq in cm-1):")
     for imode in range(len(ww)):
 
         #In case of imaginary freqs (when ww is imaginary, it has a negative sign):
         ww[imode] = abs(ww[imode])
+        freq_mode[imode] = ww[imode]/c10*c9/(math.pi * 2) #converting to cm-1
 
         freq = vib_modes[imode][0] 
         sampling_mode = vib_modes[imode][1] # it must be 'Q', 'E', 'T', or 'R' 
@@ -152,10 +155,17 @@ def polyatom_vibration_sampling(mass, atoms, q_eq, ww, L, vib_modes, **kwargs):
             nvib += [nv]
         else:
             raise ValueError("sampling_mode must be 'Q', 'E', 'T'") 
+
+        print(f"{imode}  {freq_mode[imode]:<10.2f}   {nv}")
     #------------------------------------------------------------------------------------------
 
     Evib = sum(np.array(energy))
     Ezero = 0.5*sum(np.array(ww))
+
+    print(f"\n{'traj index:':15} {traj_index} {'     Ezero':15} {'      Evib':15} {'      Eexc':15}")
+    print(f"{'kcal/mol -->':15} {Ezero*c4:15.3f} {Evib*c4:15.3f} {(Evib-Ezero)*c4:15.3f}")
+    print(f"{'kJ/mol   -->':15} {Ezero*c7:15.3f} {Evib*c7:15.3f} {(Evib-Ezero)*c7:15.3f}")
+    print(f"{'cm-1     -->':15} {Ezero*c5:15.3f} {Evib*c5:15.3f} {(Evib-Ezero)*c5:15.3f}\n")
 
     if verbosity == True:
         output_file = "sampled_mode_energies.txt" 

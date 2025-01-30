@@ -80,13 +80,15 @@ def thermal_rot_classic_spherical_top(RT,Inertia):
 #====================================================
 
 
-#===#################WRONG< here Ixyz must the principial axis=================================================
+#====================================================
 def thermal_rot_asymmetric_top_equipart(RT,Ixyz):
 #----------------------------------------------------
 #   Each rotational axis has  RT/2 energy
 #   Lx^2/(2Ix)=RT/2 --> Lx
 #   Ly^2/(2Iy)=RT/2 --> Ly
 #   Lz^2/(2Iz)=RT/2 --> Lz
+#
+# Linear case is missing
 #---------------------------------------------------
     Lrot = np.zeros(3)
 
@@ -105,7 +107,6 @@ def thermal_rot_asymmetric_top_equipart(RT,Ixyz):
     return Lrot
 #====================================================
 
-
 #====================================================
 def thermal_rot_symmetric_top(RT,Ixyz):
 #----------------------------------------------------
@@ -114,8 +115,6 @@ def thermal_rot_symmetric_top(RT,Ixyz):
 #    prolate: Ix < Iy = Iz  (cigar shaped)
 #----------------------------------------------------
     Lrot = np.zeros(3)
-
-    rand = np.random.normal(0.0,sigma)
 
     dd1 = abs(Ixyz[1]-Ixyz[0])
     dd2 = abs(Ixyz[2]-Ixyz[1])
@@ -136,14 +135,14 @@ def thermal_rot_symmetric_top(RT,Ixyz):
 
         # random number with normal distribution
         # thats variance is 1.0 and mean is 0.0
-        rnd_gauss = np.random.randn()
+        rnd_gauss = random.gauss(0.0, 1.0)
 
         # therefore, Lz component can obtain as
         Lrot[2] = np.sqrt(Ixyz[2]*RT)*rnd_gauss
 
         #------------------------------------------
         # L=Ltot obeys the following distiribution:
-        # L*exp(L^2/(2*Iavg*RT)) where Lz < L < inf
+        # L*exp(-L^2/(2*Iavg*RT)) where Lz < L < inf
         # (remark: Ix=Iy < Iz)
         # 
         # where Iavg is the average inertia
@@ -157,8 +156,6 @@ def thermal_rot_symmetric_top(RT,Ixyz):
         rand = random.uniform(0,1)
         L = np.sqrt(Lrot[2]**2 - 2.0*Iavg*RT*np.log(1-rand))
 
-
-        rand = random.uniform(0,1)
         angle = random.uniform(0,2*math.pi)
 
         Lrot[0] = np.sqrt(L**2 - Lrot[2]**2)*np.cos(angle)
@@ -177,14 +174,14 @@ def thermal_rot_symmetric_top(RT,Ixyz):
 
         # random number with normal distribution
         # thats variance is 1.0 and mean is 0.0
-        rnd_gauss = np.random.randn()
+        rnd_gauss = random.gauss(0.0, 1.0)
 
         # therefore, Lx component can obtain as
         Lrot[0] = np.sqrt(Ixyz[0]*RT)*rnd_gauss
 
         #------------------------------------------
         # L=Ltot obeys the following distiribution:
-        # L*exp(L^2/(2*Iavg*RT)) where Lx < L < inf
+        # L*exp(-L^2/(2*Iavg*RT)) where Lx < L < inf
         # (remark: Ix < Iy = Iz)
         #
         # where Iavg is the average inertia
@@ -198,7 +195,6 @@ def thermal_rot_symmetric_top(RT,Ixyz):
         rand = random.uniform(0,1)
         L = np.sqrt(Lrot[0]**2 - 2.0*Iavg*RT*np.log(1-rand))
 
-        rand = random.uniform(0,1)
         angle = random.uniform(0,2*math.pi)
 
         Lrot[2] = np.sqrt(L**2 - Lrot[0]**2)*np.cos(angle)
@@ -209,7 +205,43 @@ def thermal_rot_symmetric_top(RT,Ixyz):
     return Lrot
 #====================================================
 
-#s = np.random.normal(mu, sigma)
+
+'''
+import random
+import numpy as np
+import matplotlib.pyplot as plt
+
+def thermal_rot_symmetric_top(RT, Ixyz):
+    Lrot = np.zeros(3)
+    
+    # Sample the Lz component
+    rnd_gauss = random.gauss(0.0, 1.0)
+    Lrot[2] = np.sqrt(Ixyz[2] * RT) * rnd_gauss
+    
+    return Lrot
+
+RT = 1.0
+Ixyz = [2.0, 2.0, 3.0]
+num_samples = 1000
+
+samples_Lz = [thermal_rot_symmetric_top(RT, Ixyz)[2] for _ in range(num_samples)]
+
+# Generate Lz values for the theoretical distribution
+Lz_vals = np.linspace(min(samples_Lz), max(samples_Lz), 500)
+Iz = Ixyz[2]
+P_Lz = np.exp(-Lz_vals**2 / (2 * Iz * RT)) / np.sqrt(2 * np.pi * Iz * RT)  # Normalized Gaussian
+
+plt.figure(figsize=(8, 5))
+plt.hist(samples_Lz, bins=30, density=True, alpha=0.6, color='skyblue', label='Sampled Lz Histogram')
+plt.plot(Lz_vals, P_Lz, 'r-', linewidth=2, label='Theoretical Distribution (P(Lz))')
+
+plt.xlabel('Lz')
+plt.ylabel('Probability Density')
+plt.title('Comparison of Sampled and Theoretical Distributions of Lz')
+plt.legend()
+plt.show()
+'''
+
 
 
 def partfu_vibr(RT,ome):

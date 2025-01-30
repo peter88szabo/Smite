@@ -10,6 +10,29 @@ from sampling.polyrotation import angular_momentum
 from sampling.polyrotation import angmom_correction_after_vibrational_sampling 
 from sampling.polyrotation import add_rotational_momentum 
 
+#     [Anstrom]*c1=[bohr]
+c1=1.0e0/0.5291772e0
+#     [kcal/mol]*c2=[Hartree]
+c2=1.e0/627.51e0
+#     [g/mol]*c3=[electron mass unit]
+c3=1838.6836605e0
+#     [Hartree]*c4=[eV]
+c4=27.2114
+#     [Hartree]*c5=[cm-1]
+c5=219474.e0
+#     [femto-sec]*c6=[time in au]
+c6=41.341105
+#     [frequency in cm-1]*c9=[freq(bohr^(-1))]
+c9=1.0e8*c1
+#     [speed of light in atomic unit]
+c10=137.035999074
+
+
+c7 = 2625.5         # [Hartree] * c7 = [kJ/mol]
+
+Rgas = 8.3144598/1000.0/c7 #Hartree/K
+
+
 
 
 def diatom_rotation_rigidrot_sampling(rot_modes, mass, q, p):
@@ -27,14 +50,22 @@ def diatom_rotation_rigidrot_sampling(rot_modes, mass, q, p):
     sampling_mode = rot_modes[0][0] # it must be 'Q', 'E', 'T'
     excitation = rot_modes[0][1] #it's either the Jrot quantum number, energy or temperature
 
+    print(f"\n-------------------------------------------------------------------------")
+    print(f"Diatom Rotational Sampling:")
     if sampling_mode == 'Q':
         jrot = excitation
         angmomabs = math.sqrt(jrot * (jrot + 1))
     elif sampling_mode == 'T':
+        print(f"Thermal Sampling:")
+        print(f"Temp = {excitation:>12.2f} K")
+        print(f"Quantum number sampled directly from thermal distribution")
+
         Rgas = (8.3144598/1000.0/2625.5) #in Hartree/K
         RT = Rgas * excitation #excitation is the temperature here
         jrot = thermal_rot_quantum_spherical_top(RT,Inertia)
+        print("jrot = ", jrot)
         angmomabs = math.sqrt(jrot * (jrot + 1))
+        print(f"angmom = {angmomabs:>12.5f} a.u.")
     else:
         raise ValueError("sampling_mode must be 'Q' or 'T'")
     #---------------------------------------------------------------------------------------
@@ -47,6 +78,13 @@ def diatom_rotation_rigidrot_sampling(rot_modes, mass, q, p):
         angmomabs * math.sin(angle),
         angmomabs * math.cos(angle)
     ]
+
+    Erot1 = sum([angmom[i]**2/ai[i]/2.0 for i in range(len(angmom))])
+    Erot = jrot*(jrot+1.0)/Inertia/2.0
+    #print(f"Erot1 = {Erot1*c5:>12.2f} cm-1  {Erot1*c7:>12.3f} kJ/mol  {Erot1*c4:>12.5f} eV")
+    print(f"Erot = {Erot*c5:>12.2f} cm-1  {Erot*c7:>12.3f} kJ/mol  {Erot*c4:>12.5f} eV")
+
+    print(f"-------------------------------------------------------------------------\n")
 
     wx = 0.0
     wy = -angmom[1] / ai[1]
@@ -68,8 +106,10 @@ def diatom_vibration_harmonic_sampling(vib_modes, req, omega, mass):
     excitation = vib_modes[0][2] #it's either the nvib quantum number, energy or temperature
 
     if sampling_mode == 'Q':
+        print(f"Diatom Vibrational Sampling: Fix nvib = {nvib:<d10}")
         energy = omega * (nvib + 0.5)
     elif sampling_mode == 'T':
+        print(f"Diatom Vibrational Sampling: Thermal Temp = {excitation:<d12.2} K")
         Rgas = (8.3144598/1000.0/2625.5) #in Hartree/K
         RT = Rgas * excitation #excitation is the temperature here
         nvib = thermal_vibr_mode(RT, omega)
