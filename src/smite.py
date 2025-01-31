@@ -956,6 +956,8 @@ class Collision(Molecule):
 
         if self.bsampling:
             self.bimp = self.bmax * math.sqrt(random.uniform(0.0,1.0))
+            print(f"Maximum of Impact parameter: bmax = {self.bmax*0.529177:<12.2f} Angstrom")
+            print(f"\nImpact parameter has been randomly sampled: b = {self.bimp*0.529177:<12.2f} Angstrom")
         else:
             self.bimp = self.bmax #fix impact parameter for opacity function P(b) calculations
 
