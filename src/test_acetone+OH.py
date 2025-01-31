@@ -95,7 +95,7 @@ if __name__ == '__main__':
     acetone  = Fragment.Polyatom_Init(fname='acetone', qchem=qcinput_singlet, xyz=xyz_acetone, random_rot=True)
     #zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=0, fix_quantum=fix_quantum)
     #zzallyl.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Temp', temp=300.0)
-    acetone.Specify_Mode_Sampling(init_vib_type='ZPE', init_rot_type='Jfix', jrot=10)
+    acetone.Specify_Mode_Sampling(init_vib_type='Temp', init_rot_type='Temp', temp=300.0)
 
     req_OH = 0.96 #Angstrom
     omega_OH = 3808.2 #cm-1

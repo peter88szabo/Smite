@@ -5,6 +5,7 @@ from utils.cenmass             import cenmass
 from normalmode.normalmode     import getNormalmode, print_frequencies
 from normalmode.nmodeprint     import print_normalmode
 from normalmode.eckart         import eckart_transform
+from sampling.thermal          import thermal_vibr_mode
 #from atomic_overlap import check_atomic_overlap
 
 #     [Anstrom]*c1=[bohr]
@@ -22,16 +23,6 @@ c10=137.035999074
 
 Rgas = 8.3144598/1000.0/c7 #Hartree/K 
 
-
-#-------------------------------------------------------
-def thermal_vibr_mode(temp, ome):
-#-------------------------------------------------------
-    RT = Rgas * temp
-    rand = random.uniform(0,1)
-    vib = -RT*np.log(1.0-rand)/abs(ome)
-    nvib = int(vib) #harmonic oscillator quantum number 
-    return nvib
-#-------------------------------------------------------
 
 #------------------------------------------------------------------------------------------
 def initialize_vibrational_modes(freq, init_vib_type='ZPE', temp=300.0):
@@ -126,6 +117,8 @@ def polyatom_vibration_sampling(mass, atoms, q_eq, ww, L, vib_modes, **kwargs):
 
     wmass = np.repeat(mass, 3)
 
+    freq_cutoff = 100.0 #cm-1
+
     energy = []
     nvib = []
     freq_mode = np.zeros_like(ww)
@@ -146,7 +139,10 @@ def polyatom_vibration_sampling(mass, atoms, q_eq, ww, L, vib_modes, **kwargs):
             nvib += [nv]
             energy += [ww[imode]*(nv + 0.5)]
         elif sampling_mode == 'T':
-            nv = thermal_vibr_mode(excitation, ww[imode])
+            RT = Rgas * excitation
+            #Truhlar like rounding/correction of too low frequencies
+            mode_freq = (freq_cutoff*c10*(math.pi * 2.0)/c9) if freq_mode[imode] < freq_cutoff else ww[imode]
+            nv = thermal_vibr_mode(RT, mode_freq)
             nvib += [nv]
             energy += [ww[imode]*(nv + 0.5)]
         elif sampling_mode == 'E':
@@ -156,7 +152,7 @@ def polyatom_vibration_sampling(mass, atoms, q_eq, ww, L, vib_modes, **kwargs):
         else:
             raise ValueError("sampling_mode must be 'Q', 'E', 'T'") 
 
-        print(f"{imode}  {freq_mode[imode]:<10.2f}   {nv}")
+        print(f"{imode:<5d}  {freq_mode[imode]:>10.2f}  {nv}")
     #------------------------------------------------------------------------------------------
 
     Evib = sum(np.array(energy))

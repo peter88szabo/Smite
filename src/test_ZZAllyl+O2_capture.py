@@ -23,31 +23,7 @@ if __name__ == '__main__':
     H   -3.35772393043684      0.25312017851188      3.15850065923520
      '''
 
-    qcinput_doublet = {
-    'qchem': 'XTB',
-    'path': '/home/peter/orca_6_0_0/xtb',
-    'nproc': 4,
-    'functional': '',
-    'basis': '',
-    'charge': 0,
-    'multiplicity': 2,
-    'additional': '--ptb --acc 50 --iterations 1000 --spinpol --tblite',
-    'wfu': False 
-    }
-
-    qcinput_singlet = {
-    'qchem': 'XTB',
-    'path': '/home/peter/orca_6_0_0/xtb',
-    'nproc': 4,
-    'functional': '',
-    'basis': '',
-    'charge': 0,
-    'multiplicity': 1,
-    'additional': '--ptb --acc 50 --iterations 1000 --spinpol --tblite',
-    'wfu': False
-    }
-
-    qcinput_Orca = {
+    qcinput_Orca_doublet = {
     'qchem': 'Orca',
     'path': '/home/peter/orca_6_0_0/orca',
     'nproc': 8,
@@ -73,47 +49,17 @@ if __name__ == '__main__':
     'wfu': False
     }
 
-    import os
-    nproc = qcinput_PySCF['nproc']
-    os.environ['OMP_NUM_THREADS'] = str(nproc)
-    
-    qcinput_Sparrow_bin = {
-    'qchem': 'Sparrow_bin',
-    'path': '/home/peter/Programs/sparrow/install/bin/sparrow',
-    'nproc': 4,
-    'functional': 'PM6',
-    'basis': '',
-    'charge': 0,
-    'multiplicity': 1,
-    'additional': '-I 200 --density_rmsd_criterion 1e-3 --self_consistence_criterion 1e-5',
-    'wfu': False
-    }
-
-
-
-    fix_quantum = [(14, 0),
-                   (15, 0)]
-
-    fix_energy  = [(0, 0.0),
-                   (1, 0.0),
-                   (2, 0.0)]
-
-    fix_temp    = [(5, 330.0),
-                   (6, 430.0)]
-
-
     seed = 12979102
     random.seed(seed)
 
 
-    zzallyl  = Fragment.Polyatom_Init(fname='ZZAllyl', qchem=qcinput_doublet, xyz=xyz_zzallyl, random_rot=True)
+    zzallyl  = Fragment.Polyatom_Init(fname='ZZAllyl', qchem=qcinput_Orca_doublet, xyz=xyz_zzallyl, random_rot=True)
     zzallyl.Specify_Mode_Sampling(init_vib_type='Temp', init_rot_type='Temp', temp=300.0)
 
     req_O2 = 1.2 #Angstrom
     omega_O2 = 1580.0 #cm-1
 
     oxygen = Fragment.Diatom_Init(fname='O2', atoms=['O','O'], req=req_O2, omega=omega_O2, random_rot=True, diatom='harmonic')
-    #oxygen.Specify_Mode_Sampling(init_rot_type='Jfix', nvib=0, jrot=0)
     oxygen.Specify_Mode_Sampling(init_rot_type='Temp', nvib=0, temp=300.0)
 
     print("--------- ZZ-OH-Allyl Isoprenyl radical--------")
@@ -134,8 +80,8 @@ if __name__ == '__main__':
     print()
 
 
-    reaction =  Collision(zzallyl, oxygen, qchem=qcinput_doublet) 
-    reaction.Specify_Collision_Sampling(Rini=6.5, bmax=4.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
+    reaction =  Collision(zzallyl, oxygen, qchem=qcinput_Orca_doublet) 
+    reaction.Specify_Collision_Sampling(Rini=7.1, bmax=7.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
 
     reaction.sample_and_run_collision(integrator='leapfrog', integrator_order=4, timestep=0.5, maxstep=10000, iprint=1, pairs_to_stop=pairs_to_test)
 
