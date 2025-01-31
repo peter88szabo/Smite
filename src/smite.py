@@ -330,7 +330,7 @@ class Molecule:
                             tstop = test_to_stop_general(q=self.q, tol=self.Rstop)
                             channel = 'Not Specified'
 
-                        print(f"step: {istep:<10d} t[fs]: {istep*dt/c6:<12.1f} V[Eh]: {(V-self.vref):<16.6f} E[Eh]: {(E-self.vref):<16.6f} dE[kJ]: {dE*c7:16.3f}    T[K]: {act_temp:10.1f} Rcom[A]: {Rcom_actual*b2a:8.2f}", flush=True)
+                        print(f"step: {istep:<10d} t[fs]: {istep*dt/c6:>12.1f} V[Eh]: {(V-self.vref):<16.6f} E[Eh]: {(E-self.vref):<16.6f} dE[kJ]: {dE*c7:16.3f}    T[K]: {act_temp:10.1f}   Rcom[A]: {Rcom_actual*b2a:8.2f}", flush=True)
 
                     else: #if not collision (just unimolecular dynamics) then we can ran the test anytime
                         print(f"step: {istep:<10d} t[fs]: {istep*dt/c6:<12.2f}  V[Eh]: {V:<16.6f} E[Eh]: {E:<16.6f} dE[kJ]: {dE*c7:16.3f}     T[K]: {act_temp:<10.1f}", flush=True)
@@ -956,8 +956,8 @@ class Collision(Molecule):
 
         if self.bsampling:
             self.bimp = self.bmax * math.sqrt(random.uniform(0.0,1.0))
-            print(f"Maximum of Impact parameter: bmax = {self.bmax*0.529177:<12.2f} Angstrom")
-            print(f"\nImpact parameter has been randomly sampled: b = {self.bimp*0.529177:<12.2f} Angstrom")
+            print(f"\nMaximum of Impact parameter: bmax = {self.bmax*0.529177:>12.2f} Angstrom")
+            print(f"Impact parameter has been randomly sampled: b = {self.bimp*0.529177:>12.2f} Angstrom\n")
         else:
             self.bimp = self.bmax #fix impact parameter for opacity function P(b) calculations
 

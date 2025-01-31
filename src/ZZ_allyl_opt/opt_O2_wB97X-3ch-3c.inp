@@ -1,0 +1,11 @@
+%maxcore 6000
+%pal nprocs 1 end
+
+!wB97X-3c tightopt freq 
+
+
+* xyz 0 3
+    O    0.00      0.00     0.00
+    O    0.00      0.00     1.20
+*
+
