@@ -1211,14 +1211,59 @@ class Collision(Molecule):
         if pairs_to_stop is None and Rstop is None:
             raise ValueError("\nEither Rstop or pairs_to_stop must be given in the input")
 
-
         self.Sample_Bimolecular_Reactants(**kwargs)
 
         self.run_trajectory(integrator=integrator, integrator_order=integrator_order, timestep=timestep, startstep=startstep, maxstep=maxstep,
                             iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=restart,
                             collision=True, Rstop=Rstop, pairs_to_stop=pairs_to_stop, spectrum=spectrum)
 
-    def multitraj_sample_and_run_collision(self, ntraj=1, integrator='verlet', integrator_order=4, timestep=1.0, startstep=0, maxstep=100, iprint=2,
+
+    def multi_paralell_traj_sample_and_run_collision(self, slurm=False, cores_per_traj=1, integrator='verlet', integrator_order=4, timestep=1.0, startstep=0, maxstep=100, iprint=2,
+                                      traj_file=None, backfile=None, restart=False, pairs_to_stop=None, Rstop=None, spectrum=False, **kwargs):
+
+        from concurrent.futures import ProcessPoolExecutor
+
+
+        if traj_file is None:
+            traj_file = 'traj_' + self.fragment_A.fname + '_+_' + self.fragment_B.fname + '.xyz'
+
+        if backfile is None:
+            backfile = 'backup_' + self.fragment_A.fname + '_+_' + self.fragment_B.fname + '.xyz'
+
+        if pairs_to_stop is None and Rstop is None:
+            raise ValueError("\nEither Rstop or pairs_to_stop must be given in the input")
+
+        if slurm:
+            total_cores = int(os.environ.get("SLURM_CPUS_ON_NODE", os.cpu_count()))
+            print("SLURM mode detected.")
+        else:
+            total_cores = os.cpu_count()
+            print("Running in local mode.")
+
+        #max_workers = max_traj
+        max_traj = total_cores // cores_per_traj
+
+        print(f"Running with {max_traj} parallel trajectories")
+        print(f"Total cores to use: {total_cores}, Cores per trajectory: {cores_per_traj}")
+
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        futures = [
+            executor.submit(
+                run_single_trajectory, self, itraj, traj_file, backfile, integrator, integrator_order, timestep,
+                startstep, maxstep, iprint, restart, pairs_to_stop, Rstop, spectrum, **kwargs
+            )
+            for itraj in range(ntraj)
+        ]
+
+        # Wait for all tasks to complete
+        for future in futures:
+            try:
+                future.result()  # Get result or raise an exception if any occurred
+            except Exception as e:
+                print(f"Error in trajectory {itraj}: {e}")
+
+
+    def multi_onebyone_traj_sample_and_run_collision(self, ntraj=1, integrator='verlet', integrator_order=4, timestep=1.0, startstep=0, maxstep=100, iprint=2,
                                       traj_file=None, backfile=None, restart=False, pairs_to_stop=None, Rstop=None, spectrum=False, **kwargs):
 
 
