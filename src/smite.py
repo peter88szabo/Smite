@@ -48,6 +48,9 @@ from thermostats.berendsen        import thermo_berendsen
 from thermostats.andersen         import thermo_andersen 
 #from thermostats.nosehoover       import NoseHoover
 
+from fssh.initialize_amplitudes   import initialize_amplitudes
+from fssh.fssh                    import propagate as fssh_propagate
+
 class Molecule:
     def __init__(self, atoms=None, mass=None, q_ini=None, p_ini=None, nfix=0, restart=False, xyz_file_path=None):
         if restart:
@@ -83,6 +86,10 @@ class Molecule:
         self.vini       = None #the initial (sampled) pot energy which is likely out of equilibrium
         self.tini       = None
         self.vsave      = []
+        self.num_states = None
+        self.curr_state = None
+        self.c          = None # quantum amplitudes
+        self.dtq        = None # Quantum time step
 
 
     def save_velocity_and_distance_matrix(self):
@@ -218,6 +225,18 @@ class Molecule:
     def thermo_andersen(self, prob, dt, Ttarg):
         self.p = thermo_andersen(self.nfix, self.p, self.wmass, dt, prob, Ttarg)
 
+    def fssh(self, num_states, starting_state, dt):
+        self.num_states = num_states
+
+        if self.curr_state is None:
+            if starting_state is None:
+                starting_state = 0
+            self.curr_state = starting_state
+        if self.c is None:
+            self.c = initialize_amplitudes(self.num_states, starting_state)
+
+        self.p, self.c, self.curr_state = fssh_propagate(dt, self.curr_state, self.c, self.q, self.p, self.atoms,
+                                                         self.wmass, self.num_states)
 
     def run_trajectory(self, integrator='verlet',
                              integrator_order=4,
@@ -234,7 +253,9 @@ class Molecule:
                              thermostat=None,
                              thermo_param=None,
                              thermo_temp=None,
-                             spectrum=False):
+                             spectrum=False,
+                             num_states=1,
+                             starting_state=None):
 
         wf_dir = "wavefunction_along_trajectory"
 
@@ -373,6 +394,9 @@ class Molecule:
                     self.sprk_single_step(dt, propag)
                 else:
                     raise ValueError("Non existing integrator. You can choose from: leapfrog, verlet, rk4, symplectic(4,6,8) and predcorr(order)")
+
+                if num_states > 1:
+                    self.fssh(num_states, starting_state, dt)
 
                 if thermostat is not None and (thermo_param or thermo_temp) is None:
                     raise ValueError("Since thermostate switched on the parameter and temperature must be given")
@@ -1247,13 +1271,13 @@ class Collision(Molecule):
         print(f"Total cores to use: {total_cores}, Cores per trajectory: {cores_per_traj}")
 
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        futures = [
-            executor.submit(
-                run_single_trajectory, self, itraj, traj_file, backfile, integrator, integrator_order, timestep,
-                startstep, maxstep, iprint, restart, pairs_to_stop, Rstop, spectrum, **kwargs
-            )
-            for itraj in range(ntraj)
-        ]
+            futures = [
+                executor.submit(
+                    run_single_trajectory, self, itraj, traj_file, backfile, integrator, integrator_order, timestep,
+                    startstep, maxstep, iprint, restart, pairs_to_stop, Rstop, spectrum, **kwargs
+                )
+                for itraj in range(ntraj)
+            ]
 
         # Wait for all tasks to complete
         for future in futures:
