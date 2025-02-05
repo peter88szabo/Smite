@@ -42,7 +42,7 @@ def getHessian(qcinput, hessFile, xyz):
     elif qchem == 'XTB':
         hess = XTB_Hessian(qcoord, atoms, qcinput)
     elif qchem == 'PES':
-        hess = PES_Hessian(qcoord, atoms)
+        hess = PES_Hessian(qcoord)
     else:
         raise ValueError("Non-Existing Quantum Chemistry interface in input. Avaiable packages: Orca, PySCF, Sparrow_Py, Sparrow_bin, XTB")
 
