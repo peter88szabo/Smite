@@ -1,3 +1,5 @@
+from typing import Optional
+
 import numpy as np
 import os
 import math
@@ -87,7 +89,7 @@ class Molecule:
         self.tini       = None
         self.vsave      = []
         self.num_states = None
-        self.curr_state = None
+        self.active_state = None
         self.c          = None # quantum amplitudes
         self.dtq        = None # Quantum time step
 
@@ -225,18 +227,18 @@ class Molecule:
     def thermo_andersen(self, prob, dt, Ttarg):
         self.p = thermo_andersen(self.nfix, self.p, self.wmass, dt, prob, Ttarg)
 
-    def fssh(self, num_states, starting_state, dt):
+    def fssh(self, num_states, initial_state, dt, dtq: Optional[float] = None):
         self.num_states = num_states
 
-        if self.curr_state is None:
-            if starting_state is None:
-                starting_state = 0
-            self.curr_state = starting_state
+        if self.active_state is None and initial_state is None:
+            initial_state = 0
+        else:
+            self.active_state = initial_state
         if self.c is None:
-            self.c = initialize_amplitudes(self.num_states, starting_state)
+            self.c = initialize_amplitudes(self.num_states, initial_state)
 
-        self.p, self.c, self.curr_state = fssh_propagate(dt, self.curr_state, self.c, self.q, self.p, self.atoms,
-                                                         self.wmass, self.num_states)
+        self.p, self.c, self.active_state = fssh_propagate(dt, self.active_state, self.c, self.q, self.p, self.atoms,
+                                                           self.wmass, self.num_states, dtq)
 
     def run_trajectory(self, integrator='verlet',
                              integrator_order=4,
