@@ -2,12 +2,13 @@ from typing import Optional
 
 import numpy as np
 from numpy.typing import NDArray
-from numpy import float64, complex128, dtype
+from numpy import float64, complex128
 
 from ..qchem_interfaces.gp_pes import PES_Energy, PES_Force, PES_Hessian
 from baeck_an_nac import calculate_nac
 
 
+# TODO: An implementation that receives a Molecule object would be more general
 def propagate(
     dtc: float,
     active_state: int,
@@ -60,10 +61,12 @@ def propagate(
     v = p / mass
 
     # Get the potential energy values
-    epot = PES_Energy(q, list(range(num_states)))
+    epot = PES_Energy(
+        q, list(range(num_states))
+    )  # TODO: This should be generally implemented for any qc method
 
     # Update coupling every classical timestep
-    d = _get_couplings(q, num_states, de_cutoff)
+    d = _get_couplings(q, epot, num_states, de_cutoff)
 
     # Propagate the quantum system and check for hops
     for _ in range(num_step):
@@ -82,7 +85,9 @@ def propagate(
     return p, c, active_state
 
 
-def _get_couplings(q: NDArray[float64], num_states: int, de_cutoff: float):
+def _get_couplings(
+    q: NDArray[float64], epot: NDArray[float64], num_states: int, de_cutoff: float
+):
     """
     Calculate the non-adiabatic couplings between all states
 
@@ -102,7 +107,6 @@ def _get_couplings(q: NDArray[float64], num_states: int, de_cutoff: float):
     """
     n_atoms, n_dof = q.shape
     states = list(range(num_states))
-    epot = PES_Energy(q, states)
 
     # Initialize coupling matrix
     d = np.zeros((num_states, num_states, n_atoms, n_dof), dtype=complex128)
@@ -111,8 +115,12 @@ def _get_couplings(q: NDArray[float64], num_states: int, de_cutoff: float):
 
     # Check if any energy difference between all states is lower than the cutoff
     if np.any(diff_epot < de_cutoff):
-        grad = -PES_Force(q, states)
-        hess = PES_Hessian(q, states)
+        grad = -PES_Force(
+            q, states
+        )  # TODO: These should be generally implemented for any qc method
+        hess = PES_Hessian(
+            q, states
+        )  # TODO: This should be generally implemented for any qc method
     else:
         grad = None
         hess = None
@@ -234,7 +242,9 @@ def _check_frustrated_hop(
     """
     previous_active_state = active_state
 
-    v, new_active_state = _rescale_velocity(q, v, d, m, epot, active_state, hopped_state)
+    v, new_active_state = _rescale_velocity(
+        q, v, d, m, epot, active_state, hopped_state
+    )
 
     if new_active_state != previous_active_state:  # Hop is not frustrated
         return v, new_active_state
