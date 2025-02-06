@@ -3,6 +3,7 @@ from scipy.linalg import svd
 from numpy.typing import NDArray
 from numpy import float64, complex128
 
+
 def calculate_nac(
     epot: list[NDArray[float64]],
     grad: list[NDArray[float64]],

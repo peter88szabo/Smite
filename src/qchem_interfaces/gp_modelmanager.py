@@ -4,7 +4,8 @@ from pathlib import Path
 import torch
 from torch import ScriptModule
 
-model_directory = './models'
+model_directory = "./models"
+
 
 class ModelManager:
     def __init__(self):
@@ -19,13 +20,15 @@ class ModelManager:
             model_directory = Path(model_directory)
 
         if not model_directory.is_dir():
-            raise ValueError(f"Directory {model_directory} does not exist. Can't load models.")
+            raise ValueError(
+                f"Directory {model_directory} does not exist. Can't load models."
+            )
 
         model_list = os.listdir(model_directory)
         model_list = [Path(model) for model in model_list]
 
         for model in model_list:
-            if model.suffix == '.pt' or model.suffix == '.pth':
+            if model.suffix == ".pt" or model.suffix == ".pth":
                 self._models[model] = torch.jit.load(model_directory / model)
 
     def get_models(self) -> list[ScriptModule]:
@@ -34,6 +37,7 @@ class ModelManager:
 
 _manager = ModelManager()
 _manager.load_models_from_directory()
+
 
 # Implicit singleton implementation through the Python module system
 def get_modelmanager():
