@@ -5,7 +5,7 @@ import torch
 from torch import ScriptModule
 from sklearn.base import TransformerMixin
 
-from src.qchem_interfaces.gp_modelmanager import get_modelmanager
+from qchem_interfaces.gp_modelmanager import get_modelmanager
 
 # [Hartree]*ha2ev=[eV]
 ha2ev = 27.2114
@@ -71,9 +71,9 @@ class GPModel:
         """
         state = self._determine_state(state)
 
-        x = x.reshape(1, -1)
         x = self.transform_data(x, state)
         x = torch.tensor(x, dtype=torch.float64)
+        print(x)
         return self.models[state](x)[0].detach().numpy() * ev2ha
 
     def variance(
@@ -84,7 +84,6 @@ class GPModel:
         """
         state = self._determine_state(state)
 
-        x = x.reshape(1, -1)
         x = self.transform_data(x, state)
         x = torch.tensor(x, dtype=torch.float64)
         return self.models[state](x)[1].detach().numpy()
@@ -100,7 +99,6 @@ class GPModel:
         state = self._determine_state(state)
 
         # Reshape the input data to a 2D array
-        x = x.reshape(1, -1)
         x = self.transform_data(x, state)
 
         def mean_f(x):
@@ -124,7 +122,6 @@ class GPModel:
         """
         state = self._determine_state(state)
 
-        x = x.reshape(1, -1)
         x = self.transform_data(x, state)
 
         def mean_f(x):

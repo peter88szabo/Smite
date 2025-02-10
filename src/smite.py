@@ -195,6 +195,9 @@ class Molecule:
         #is to prevent unnecessary wave function printing when wfu is switched on
         T, V, E = Energy(self.qchem, file_wf, self.q, self.p, self.atoms, self.wmass)
 
+        if self.active_state is not None:
+            V, E = V[self.active_state], E[self.active_state]
+
         if check and os.path.exists(file_wf) and self.qchem['wfu']:
             os.remove(file_wf)
             
@@ -327,7 +330,9 @@ class Molecule:
 
                     if self.qchem['wfu']:
                         file_wf = os.path.join(wf_dir, 'wavefunc_' + self.fname + '_step_' + str(istep) + '.molden')
-                        T, V, E = self.get_energy(file_wf=file_wf) 
+                        T, V, E = self.get_energy(file_wf=file_wf)
+                    elif self.num_states > 1:
+                        T, V, E = self.get_energy()
                     else:
                         T, V, E = self.get_energy() 
 
@@ -645,7 +650,7 @@ class Fragment(Molecule):
        #--------------------------------------------------------------------
         if not rigid and not fromMD:
             hessFile = 'hessian_' + fname + '.hess'
-            hessian = getHessian(qcinput=qchem, hessFile=hessFile, xyz=xyz)
+            hessian = getHessian(qcinput=qchem, hessFile=hessFile, xyz=xyz, active_state=this.active_state)
 
             if print_nmode:
                 freq, freq_low, Lmat = print_normalmode(fname=fname, atoms=atoms, mass=mass, q_eq=q_eq, hessian=hessian,

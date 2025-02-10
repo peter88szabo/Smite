@@ -1,0 +1,42 @@
+if __name__ == '__main__':
+    import random
+    from smite import Molecule, Fragment, Collision
+
+    xyz_water = '''
+    O      0.000000    0.000000    0.000000
+    H      0.586193    0.757215    0.000000
+    H      0.586193   -0.757215    0.000000
+    '''
+
+    qcinput = {
+    'qchem': 'PES',
+    'wfu': ''
+    }
+
+    seed = 12949102
+    random.seed(seed)
+
+
+    water = Fragment
+    water.active_state = 1
+    water.num_states = 2
+
+    water  = Fragment.Polyatom_Init(fname="h2o", qchem=qcinput, xyz=xyz_water, random_rot=True, rigid=True)
+    water.Specify_Mode_Sampling(init_rot_type='Jfix', jrot=3, rigid=True)
+
+    krypton = Fragment.Atom_Init(fname='Kr', atoms=['Kr'])
+
+    pairs_to_test = {
+    'Habstr_1': [((0, 1), 'GT', 8.0)],
+    'Habstr_2': [((0, 2), 'GT', 8.0)],
+    'Nonreact': [((0, 1), 'LT', 2.5), ((0, 2), 'LT', 2.5), ((0, 3), 'GT', 8.0)]
+    # add more channels and pairs as needed
+    }
+
+    print("\nReaction of H2O + Cl\n")
+
+    reaction = Collision(water, krypton, qchem=qcinput)
+    reaction.Specify_Collision_Sampling(Rini=7.0, bmax=3.0, bsampling=True, Ecoll=20.0, temp=300.0)
+    reaction.active_state = 1
+    reaction.num_states = 2
+    reaction.sample_and_run_collision(integrator='symplectic', integrator_order=4, timestep=0.5, maxstep=10000, iprint=4, pairs_to_stop=pairs_to_test)

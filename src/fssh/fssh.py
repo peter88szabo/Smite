@@ -4,8 +4,8 @@ import numpy as np
 from numpy.typing import NDArray
 from numpy import float64, complex128
 
-from ..qchem_interfaces.gp_pes import PES_Energy, PES_Force, PES_Hessian
-from baeck_an_nac import calculate_nac
+from qchem_interfaces.gp_pes import PES_Energy, PES_Force, PES_Hessian
+from .baeck_an_nac import calculate_nac
 
 
 # TODO: An implementation that receives a Molecule object would be more general
