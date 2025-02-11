@@ -862,6 +862,7 @@ class Collision(Molecule):
 
         super().__init__(atoms=atoms, mass=mass, q_ini=q_ini, p_ini=p_ini)
         self.qchem = qchem
+        self.fname = f"{fragment_A.fname}{fragment_B.fname}"
         self.Rini = None
         self.bmax = None
         self.bsampling = None
@@ -1257,13 +1258,13 @@ class Collision(Molecule):
         print(f"Total cores to use: {total_cores}, Cores per trajectory: {cores_per_traj}")
 
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        futures = [
-            executor.submit(
-                run_single_trajectory, self, itraj, traj_file, backfile, integrator, integrator_order, timestep,
-                startstep, maxstep, iprint, restart, pairs_to_stop, Rstop, spectrum, **kwargs
-            )
-            for itraj in range(ntraj)
-        ]
+            futures = [
+                executor.submit(
+                    run_single_trajectory, self, itraj, traj_file, backfile, integrator, integrator_order, timestep,
+                    startstep, maxstep, iprint, restart, pairs_to_stop, Rstop, spectrum, **kwargs
+                )
+                for itraj in range(ntraj)
+            ]
 
         # Wait for all tasks to complete
         for future in futures:
