@@ -3,7 +3,7 @@ from numba import jit
 from numpy._typing import NDArray
 from numpy import float64
 
-from src.integrators.gradient import force_calc
+from integrators.gradient import force_calc
 
 
 def rattle(
@@ -13,7 +13,7 @@ def rattle(
     q: NDArray[float64],
     p: NDArray[float64],
     atoms: list,
-    constrained_bonds: list[list] | NDArray[float64],
+    constrained_bonds: list[tuple] | list[list] | NDArray[float64],
     tol: float = 1e-8,
 ) -> tuple[NDArray[float64], NDArray[float64]]:
     """
@@ -51,6 +51,9 @@ def rattle(
     if isinstance(constrained_bonds, list):
         constrained_bonds = np.array(constrained_bonds)
 
+    # Transform coordinates and mass arrays into 2D matrices
+    q, mass, p = q.reshape(-1,3), mass.reshape(-1,3), p.reshape(-1,3)
+
     # Transform momenta to velocities to simplify the equations
     v = p / mass
 
@@ -62,6 +65,8 @@ def rattle(
     )
 
     p_new = v_new * mass
+
+    q_new, p_new = q_new.reshape(q.shape[0] * 3), p_new.reshape(p.shape[0] * 3)
 
     return q_new, p_new
 
@@ -103,7 +108,7 @@ def _propagate(
     fixed_internals: NDArray[float64],
     constrained_bonds: NDArray[float64],
     tol: float,
-) -> tuple[NDArray[float64], NDArray[float64]]:
+) -> list[NDArray[float64], NDArray[float64]]:
     """
     Propagate the positions and velocities using the RATTLE algorithm.
 
@@ -199,7 +204,10 @@ def leapfrog_halfstep(
     q_dt = q.copy()
     v_dt_half = v.copy()
 
-    f = force_calc(qcinput, q, atoms)
+    q_dt_arr = q_dt.reshape(q.shape[0] * 3)
+    f = force_calc(qcinput, q_dt_arr, atoms)
+    f = f.reshape(-1,3)
+
     v_dt_half += 1 / (2 * mass) * dt * f  # Half-step
     q_dt += dt * v_dt_half
 
@@ -236,8 +244,8 @@ def distance_constraint(
 
 @jit(nopython=True)
 def velocity_constraint(
-    q_dt: tuple[NDArray[float64], NDArray[float64]],
-    v_dt: tuple[NDArray[float64], NDArray[float64]],
+    q_dt: list[NDArray[float64], NDArray[float64]],
+    v_dt: list[NDArray[float64], NDArray[float64]],
 ) -> float:
     """
     The velocity constraints removes the velocity along the bond.
@@ -264,8 +272,8 @@ def velocity_constraint(
 
 @jit(nopython=True)
 def gamma_iterate(
-    q_t0: tuple[NDArray[float64], NDArray[float64]],
-    q_dt: tuple[NDArray[float64], NDArray[float64]],
+    q_t0: list[NDArray[float64], NDArray[float64]],
+    q_dt: list[NDArray[float64], NDArray[float64]],
     constraint: float,
     m_a: float,
     m_b: float,
@@ -324,7 +332,7 @@ def gamma_iterate(
 @jit(nopython=True)
 def gamma_step(
     diff_q_t0: NDArray[float64],
-    q_dt: tuple[NDArray[float64], NDArray[float64]],
+    q_dt: list[NDArray[float64], NDArray[float64]],
     constraint: float,
     reciprocal_reduced_mass: float,
     dt: float,
@@ -360,7 +368,7 @@ def gamma_step(
 def eta_step(
     diff_q_dt: NDArray[float64],
     dotprod_diff_q_dt: float,
-    v_dt: tuple[NDArray[float64], NDArray[float64]],
+    v_dt: list[NDArray[float64], NDArray[float64]],
     reciprocal_reduced_mass: float,
     dt: float,
 ) -> float:
@@ -398,8 +406,8 @@ def eta_step(
 
 @jit(nopython=True)
 def eta_iterate(
-    q_dt: tuple[NDArray[float64], NDArray[float64]],
-    v_dt: tuple[NDArray[float64], NDArray[float64]],
+    q_dt: list[NDArray[float64], NDArray[float64]],
+    v_dt: list[NDArray[float64], NDArray[float64]],
     constraint: float,
     m_a: float,
     m_b: float,
@@ -454,7 +462,7 @@ def eta_iterate(
 
 @jit(nopython=True)
 def update_distance_constraints(
-    q_dt, fixed_internals, constraints, constrained_bonds
+    q_dt: NDArray[float64], fixed_internals: NDArray[float64], constraints: NDArray[float64], constrained_bonds: NDArray[float64]
 ) -> np.ndarray:
     """
     Update all distance constraints as specified by the bonds dictionary.
@@ -522,8 +530,8 @@ def update_velocity_constraints(
         atom_2 = constrained_bonds[bond, 1]
 
         constraint = velocity_constraint(
-            q_dt=(q_dt[atom_1, :], q_dt[atom_2, :]),
-            v_dt=(v_dt[atom_1, :], v_dt[atom_2, :]),
+            q_dt=[q_dt[atom_1, :], q_dt[atom_2, :]],
+            v_dt=[v_dt[atom_1, :], v_dt[atom_2, :]],
         )
         constraints[bond] = constraint
 
@@ -576,8 +584,8 @@ def coords_corr(
             atom_2 = constrained_bonds[bond, 1]
 
             q_dt[atom_1, :], q_dt[atom_2, :] = gamma_iterate(
-                q_t0=(q_t0[atom_1, :], q_t0[atom_2, :]),
-                q_dt=(q_dt[atom_1, :], q_dt[atom_2, :]),
+                q_t0=[q_t0[atom_1, :], q_t0[atom_2, :]],
+                q_dt=[q_dt[atom_1, :], q_dt[atom_2, :]],
                 constraint=constraints[bond],
                 m_a=mass[atom_1, atom_1],
                 m_b=mass[atom_2, atom_2],
@@ -638,8 +646,8 @@ def v_corr(
             atom_2 = constrained_bonds[bond, 1]
 
             v_dt[atom_1, :], v_dt[atom_2, :] = eta_iterate(
-                q_dt=(q_dt[atom_1, :], q_dt[atom_2, :]),
-                v_dt=(v_dt[atom_1, :], v_dt[atom_2, :]),
+                q_dt=[q_dt[atom_1, :], q_dt[atom_2, :]],
+                v_dt=[v_dt[atom_1, :], v_dt[atom_2, :]],
                 constraint=constraints[bond],
                 m_a=mass[atom_1, atom_1],
                 m_b=mass[atom_2, atom_2],

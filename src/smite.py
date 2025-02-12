@@ -6,7 +6,6 @@ import math
 import shutil
 import random
 
-from src.integrators.rattle import rattle
 from utils.cenmass                import cenmass
 from utils.euler                  import euler_rot          
 from utils.format_and_print       import parse_MDtraj_as_sampling 
@@ -45,6 +44,8 @@ from integrators.symplectic       import Symplectic
 from integrators.sprk             import SPRK
 from integrators.predcorr         import PredCorr 
 from integrators.gradient         import Energy
+from integrators.rattle import rattle
+
 
 from thermostats.randmomentum     import random_initialize_momenta
 from thermostats.berendsen        import thermo_berendsen 
@@ -227,7 +228,7 @@ class Molecule:
         self.q, self.p = this_class.predcorr(self.qchem, dt, self.wmass, self.q, self.p, self.atoms)
 
     def rattle_single_step(self, dt, **kwargs):
-        self.q, self.p = rattle(self.qchem, dt, self.wmass, self.q, self.p, self.atoms, self.constrained_bonds, **kwargs)
+        self.q, self.p = rattle(self.qchem, dt, self.wmass, self.q, self.p, self.atoms, **kwargs)
 
     def thermo_berendsen(self, tau, dt, Ttarg):
         self.p = thermo_berendsen(self.nfix, self.p, self.wmass, dt, tau, Ttarg)
@@ -265,7 +266,8 @@ class Molecule:
                              thermo_temp=None,
                              spectrum=False,
                              num_states=1,
-                             starting_state=None):
+                             starting_state=None,
+                             **kwargs):
 
         wf_dir = "wavefunction_along_trajectory"
 
@@ -1254,7 +1256,7 @@ class Collision(Molecule):
 
         self.run_trajectory(integrator=integrator, integrator_order=integrator_order, timestep=timestep, startstep=startstep, maxstep=maxstep,
                             iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=restart,
-                            collision=True, Rstop=Rstop, pairs_to_stop=pairs_to_stop, spectrum=spectrum)
+                            collision=True, Rstop=Rstop, pairs_to_stop=pairs_to_stop, spectrum=spectrum, **kwargs)
 
 
     def multi_paralell_traj_sample_and_run_collision(self, slurm=False, cores_per_traj=1, integrator='verlet', integrator_order=4, timestep=1.0, startstep=0, maxstep=100, iprint=2,
