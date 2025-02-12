@@ -6,6 +6,7 @@ import math
 import shutil
 import random
 
+from src.integrators.rattle import rattle
 from utils.cenmass                import cenmass
 from utils.euler                  import euler_rot          
 from utils.format_and_print       import parse_MDtraj_as_sampling 
@@ -54,7 +55,7 @@ from fssh.initialize_amplitudes   import initialize_amplitudes
 from fssh.fssh                    import propagate as fssh_propagate
 
 class Molecule:
-    def __init__(self, atoms=None, mass=None, q_ini=None, p_ini=None, nfix=0, restart=False, xyz_file_path=None):
+    def __init__(self, atoms=None, mass=None, q_ini=None, p_ini=None, nfix=0, restart=False, xyz_file_path=None, constrained_bonds=None):
         if restart:
             if not xyz_file_path:
                 raise ValueError("Backup file must be provided when restart is True.")
@@ -92,6 +93,7 @@ class Molecule:
         self.active_state = None
         self.c          = None # quantum amplitudes
         self.dtq        = None # Quantum time step
+        self.constrained_bonds = constrained_bonds
 
 
     def save_velocity_and_distance_matrix(self):
@@ -223,6 +225,9 @@ class Molecule:
 
     def predcorr_single_step(self, dt, this_class):
         self.q, self.p = this_class.predcorr(self.qchem, dt, self.wmass, self.q, self.p, self.atoms)
+
+    def rattle_single_step(self, dt, **kwargs):
+        self.q, self.p = rattle(self.qchem, dt, self.wmass, self.q, self.p, self.atoms, self.constrained_bonds, **kwargs)
 
     def thermo_berendsen(self, tau, dt, Ttarg):
         self.p = thermo_berendsen(self.nfix, self.p, self.wmass, dt, tau, Ttarg)
@@ -399,6 +404,9 @@ class Molecule:
                     self.symplectic_single_step(dt, propag)
                 elif integrator == 'sprk':
                     self.sprk_single_step(dt, propag)
+                elif integrator == 'rattle':
+                    self.rattle_single_step(dt, **kwargs)
+
                 else:
                     raise ValueError("Non existing integrator. You can choose from: leapfrog, verlet, rk4, symplectic(4,6,8) and predcorr(order)")
 
