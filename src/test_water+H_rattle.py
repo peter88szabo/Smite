@@ -10,13 +10,13 @@ if __name__ == '__main__':
 
     qcinput = {
     'qchem': 'XTB',
-    'path': '/home/jenne/repos/Smite/xtb-dist/bin/xtb',
+    'path': '/home/jenne/xtb-dist/bin/xtb',
     'nproc': 4,
     'functional': '',
     'basis': '',
     'charge': 1,
     'multiplicity': 1,
-    'additional': '--acc 50 --iterations 1000 --spinpol --tblite',
+    'additional': '',
     'wfu': False
     }
 
@@ -54,7 +54,7 @@ if __name__ == '__main__':
     constrained_bonds = [(0,1),(0,2),(1,2)]
 
     reaction = Collision(water, hydrogen, qchem=qcinput)
-    reaction.Specify_Collision_Sampling(Rini=7.0, bmax=3.0, bsampling=True, Ecoll=20.0, temp=300.0)
+    reaction.Specify_Collision_Sampling(Rini=4., bmax=3.0, bsampling=True, Ecoll=20.0, temp=300.0)
 
     reaction.sample_and_run_collision(integrator='rattle', timestep=0.5, maxstep=10000, iprint=1, pairs_to_stop=pairs_to_test, constrained_bonds=constrained_bonds)
 

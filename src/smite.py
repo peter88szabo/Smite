@@ -1257,11 +1257,11 @@ class Collision(Molecule):
         print(f"Total cores to use: {total_cores}, Cores per trajectory: {cores_per_traj}")
 
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        futures = [
-            executor.submit(
-                run_single_trajectory, self, itraj, traj_file, backfile, integrator, integrator_order, timestep,
-                startstep, maxstep, iprint, restart, pairs_to_stop, Rstop, spectrum, **kwargs
-            )
+            futures = [
+                executor.submit(
+                    run_single_trajectory, self, itraj, traj_file, backfile, integrator, integrator_order, timestep,
+                    startstep, maxstep, iprint, restart, pairs_to_stop, Rstop, spectrum, **kwargs
+                )
             for itraj in range(ntraj)
         ]
 
