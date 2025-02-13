@@ -44,7 +44,7 @@ def calculate_nac(
             + " for one particle and multiple dof."
         )
     else:
-        n_atoms, n_dof = grad[0].shape
+        n_atoms, n_dof = grad[0].shape[0], 3
 
     de = epot[1] - epot[0]
     dde_dx = grad[1] - grad[0]
