@@ -13,6 +13,7 @@ def rattle(
     q: NDArray[float64],
     p: NDArray[float64],
     atoms: list,
+    active_state: int,
     constrained_bonds: list[tuple] | list[list] | NDArray[float64],
     tol: float = 1e-8,
 ) -> tuple[NDArray[float64], NDArray[float64]]:
@@ -61,7 +62,7 @@ def rattle(
 
     # RATTLE update
     q_new, v_new = _propagate(
-        qcinput, mass, dt, q, v, atoms, fixed_internals, constrained_bonds, tol
+        qcinput, mass, dt, q, v, atoms, active_state, fixed_internals, constrained_bonds, tol
     )
 
     p_new = v_new * mass
@@ -105,6 +106,7 @@ def _propagate(
     q: NDArray[float64],
     v: NDArray[float64],
     atoms: list,
+    active_state: int,
     fixed_internals: NDArray[float64],
     constrained_bonds: NDArray[float64],
     tol: float,
@@ -142,7 +144,7 @@ def _propagate(
     v_t0 = v.copy()
 
     # Unconstrained step
-    q_dt, v_dt_half = leapfrog_halfstep(qcinput, mass, dt, q_t0, v_t0, atoms)
+    q_dt, v_dt_half = leapfrog_halfstep(qcinput, active_state, mass, dt, q_t0, v_t0, atoms)
 
     q_constraints, v_constraints = (
         np.zeros(len(constrained_bonds)),
@@ -157,7 +159,7 @@ def _propagate(
     )
 
     # Second half-step to update the velocities with the force calculated with the new t+dt coords
-    _, v_dt = leapfrog_halfstep(qcinput, mass, dt, q_dt_corr, v_dt_half, atoms)
+    _, v_dt = leapfrog_halfstep(qcinput, active_state, mass, dt, q_dt_corr, v_dt_half, atoms)
 
     # Determine the constraints on the velocities for the new coordinates
     v_constraints = update_velocity_constraints(
@@ -172,6 +174,7 @@ def _propagate(
 
 def leapfrog_halfstep(
     qcinput: dict,
+    active_state: int,
     mass: NDArray[float64],
     dt: float,
     q: NDArray[float64],
@@ -205,7 +208,7 @@ def leapfrog_halfstep(
     v_dt_half = v.copy()
 
     q_dt_arr = q_dt.reshape(q.shape[0] * 3)
-    f = force_calc(qcinput, q_dt_arr, atoms)
+    f = force_calc(qcinput, q_dt_arr, atoms, active_state)
     f = f.reshape(-1,3)
 
     v_dt_half += 1 / (2 * mass) * dt * f  # Half-step
@@ -266,6 +269,7 @@ def velocity_constraint(
     diff_velocities_dt = v_dt[0] - v_dt[1]
 
     # Are the position and velocity vectors perpendicular i.e. zero dot product?
+    # If zero, there is no velocity along the constrained bond
     constraint = np.dot(diff_coords_dt, diff_velocities_dt)
     return constraint
 
@@ -658,5 +662,4 @@ def v_corr(
             constraints = update_velocity_constraints(
                 q_dt, v_dt, constraints, constrained_bonds
             )
-
     return v_dt
