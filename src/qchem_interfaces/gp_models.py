@@ -11,6 +11,8 @@ from qchem_interfaces.gp_modelmanager import get_modelmanager
 ha2ev = 27.2114
 # [eV]*ev2ha=[Hartree]
 ev2ha = 1 / ha2ev
+# [Angstrom]*ang2bohr=[bohr]
+ang2bohr = 1.0e0 / 0.5291772e0
 
 
 class GPModel:
@@ -56,6 +58,8 @@ class GPModel:
         """
         state = self._determine_state(state)
 
+        x = x * ang2bohr
+
         if self.transformers is not None:
             return self.transformers[state].transform(x)
         else:
@@ -73,7 +77,8 @@ class GPModel:
 
         x = self.transform_data(x, state)
         x = torch.tensor(x, dtype=torch.float64)
-        print(x)
+        x = self.reshape(x)
+
         return self.models[state](x)[0].detach().numpy() * ev2ha
 
     def variance(
@@ -86,7 +91,14 @@ class GPModel:
 
         x = self.transform_data(x, state)
         x = torch.tensor(x, dtype=torch.float64)
+        x = self.reshape(x)
+
         return self.models[state](x)[1].detach().numpy()
+
+    def reshape(self, x):
+        if x.ndim == 1:
+            x = x.reshape(1, -1)
+        return x
 
     def grad(
         self, x: np.ndarray[float], state: Optional[int] = None
@@ -104,8 +116,10 @@ class GPModel:
         def mean_f(x):
             return self.models[state](x)[0]
 
+        x = torch.tensor(x, dtype=torch.float64)
+        x = self.reshape(x)
         x = torch.autograd.Variable(
-            torch.tensor(x, dtype=torch.float64), requires_grad=True
+            x, requires_grad=True
         )
 
         grad = torch.autograd.functional.jacobian(mean_f, x).squeeze()
@@ -127,8 +141,10 @@ class GPModel:
         def mean_f(x):
             return self.models[state](x)[0]
 
+        x = torch.tensor(x, dtype=torch.float64)
+        x = self.reshape(x)
         x = torch.autograd.Variable(
-            torch.tensor(x, dtype=torch.float64), requires_grad=True
+            x, requires_grad=True
         )
 
         hess = torch.autograd.functional.hessian(mean_f, x).squeeze()
