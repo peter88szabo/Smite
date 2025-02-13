@@ -6,6 +6,7 @@ import math
 import shutil
 import random
 
+from fssh.property_writer         import PropertyWriter
 from utils.cenmass                import cenmass
 from utils.euler                  import euler_rot          
 from utils.format_and_print       import parse_MDtraj_as_sampling 
@@ -90,9 +91,10 @@ class Molecule:
         self.vini       = None #the initial (sampled) pot energy which is likely out of equilibrium
         self.tini       = None
         self.vsave      = []
-        self.num_states = None
+        self.num_states = 1
         self.active_state = None
         self.c          = None # quantum amplitudes
+        self.d          = None # Non-adiabatic coupling
         self.dtq        = None # Quantum time step
         self.constrained_bonds = constrained_bonds
 
@@ -196,14 +198,11 @@ class Molecule:
 
         #Everything else here (other than this single line)
         #is to prevent unnecessary wave function printing when wfu is switched on
-        T, V, E = Energy(self.qchem, file_wf, self.q, self.p, self.atoms, self.wmass)
-
-        if self.active_state is not None:
-            V, E = V[self.active_state], E[self.active_state]
+        T, V, E = Energy(self.qchem, file_wf, self.q, self.p, self.atoms, self.wmass, self.active_state)
 
         if check and os.path.exists(file_wf) and self.qchem['wfu']:
             os.remove(file_wf)
-            
+
         return T, V, E 
 
     def stormer_single_step(self, dt):
@@ -228,7 +227,7 @@ class Molecule:
         self.q, self.p = this_class.predcorr(self.qchem, dt, self.wmass, self.q, self.p, self.atoms)
 
     def rattle_single_step(self, dt, **kwargs):
-        self.q, self.p = rattle(self.qchem, dt, self.wmass, self.q, self.p, self.atoms, **kwargs)
+        self.q, self.p = rattle(self.qchem, dt, self.wmass, self.q, self.p, self.atoms, self.active_state, **kwargs)
 
     def thermo_berendsen(self, tau, dt, Ttarg):
         self.p = thermo_berendsen(self.nfix, self.p, self.wmass, dt, tau, Ttarg)
@@ -236,18 +235,11 @@ class Molecule:
     def thermo_andersen(self, prob, dt, Ttarg):
         self.p = thermo_andersen(self.nfix, self.p, self.wmass, dt, prob, Ttarg)
 
-    def fssh(self, num_states, initial_state, dt, dtq: Optional[float] = None):
-        self.num_states = num_states
-
-        if self.active_state is None and initial_state is None:
-            initial_state = 0
-        else:
-            self.active_state = initial_state
+    def fssh(self, dt, dtq: Optional[float] = None, **kwargs):
         if self.c is None:
-            self.c = initialize_amplitudes(self.num_states, initial_state)
+            self.c = initialize_amplitudes(self.num_states, self.active_state)
+        self.p, self.c, self.active_state, self.d = fssh_propagate(dt, self.active_state, self.num_states, self.q, self.p, self.wmass, self.c, dtq=dtq, **kwargs)
 
-        self.p, self.c, self.active_state = fssh_propagate(dt, self.active_state, self.c, self.q, self.p, self.atoms,
-                                                           self.wmass, self.num_states, dtq)
 
     def run_trajectory(self, integrator='verlet',
                              integrator_order=4,
@@ -265,9 +257,8 @@ class Molecule:
                              thermo_param=None,
                              thermo_temp=None,
                              spectrum=False,
-                             num_states=1,
-                             starting_state=None,
-                             **kwargs):
+                             **kwargs
+                       ):
 
         wf_dir = "wavefunction_along_trajectory"
 
@@ -329,6 +320,8 @@ class Molecule:
         if integrator == 'sprk':
             propag = SPRK(integrator_order)
 
+        property_writer = PropertyWriter()
+
         with open(traj_file, "a") as file_trj:
             for istep in range(startstep, maxstep):
 
@@ -338,8 +331,6 @@ class Molecule:
                     if self.qchem['wfu']:
                         file_wf = os.path.join(wf_dir, 'wavefunc_' + self.fname + '_step_' + str(istep) + '.molden')
                         T, V, E = self.get_energy(file_wf=file_wf)
-                    elif self.num_states > 1:
-                        T, V, E = self.get_energy()
                     else:
                         T, V, E = self.get_energy() 
 
@@ -412,8 +403,16 @@ class Molecule:
                 else:
                     raise ValueError("Non existing integrator. You can choose from: leapfrog, verlet, rk4, symplectic(4,6,8) and predcorr(order)")
 
-                if num_states > 1:
-                    self.fssh(num_states, starting_state, dt)
+                if self.num_states > 1:
+                    self.fssh(dt)
+                    property_writer.write(
+                        self.get_energy()[1],
+                        self.c,
+                        istep,
+                        dt,
+                        self.active_state,
+                        self.d
+                    )
 
                 if thermostat is not None and (thermo_param or thermo_temp) is None:
                     raise ValueError("Since thermostate switched on the parameter and temperature must be given")
@@ -507,6 +506,7 @@ class Molecule:
         c7 = 2625.5  #[Hartree]*c7=[kJ/mol] 
         c5 = 219474.0  #[Hartree]*c5=[cm-1]
         c6 = 41.341105 #[femto-sec]*c6=[time in au]
+
         trajfile.write(str(self.natom) + "\n")
         trajfile.write("%6s %10d %8s %10.2f %12s %16.8f %12s %12.8f %10s %15.4f %8s %7.1f\n" %
                        ("step= ",istep, " t[fs]= ", dt*istep/c6, " Vpot[Eh]= ", V, " Tkin[Eh]= ", T, " dE[kJ]= ",dE*c7, " T[K]= ", Temp ))
