@@ -57,6 +57,9 @@ def propagate(
     # Initialize the hopped state to -1, no hop has occured
     hopped_state = -1
 
+    # Reshape momentum and masses
+    p, mass = p.reshape(-1, 3), mass.reshape(-1, 3)
+
     # Transform momentum into velocity to simplify equations
     v = p / mass
 
@@ -81,8 +84,9 @@ def propagate(
         )
 
     p = mass * v  # Transform velocity back to momentum
+    p = p.reshape(-1)
 
-    return p, c, active_state
+    return p, c, active_state, d
 
 
 def _get_couplings(
@@ -105,7 +109,7 @@ def _get_couplings(
     NDArray[complex128]
         Non-adiabatic coupling matrix.
     """
-    n_atoms, n_dof = q.shape
+    n_atoms, n_dof = q.shape[0] // 3, 3
     states = list(range(num_states))
 
     # Initialize coupling matrix
@@ -118,9 +122,11 @@ def _get_couplings(
         grad = -PES_Force(
             q, states
         )  # TODO: These should be generally implemented for any qc method
+        grad = grad.reshape(num_states, n_atoms, n_dof) # reshape for nac calc
         hess = PES_Hessian(
             q, states
         )  # TODO: This should be generally implemented for any qc method
+        hess = hess.reshape(num_states, n_atoms * n_dof, n_atoms * n_dof) # reshape for nac calc
     else:
         grad = None
         hess = None
