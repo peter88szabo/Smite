@@ -28,7 +28,7 @@ def Potential_Energy(qcinput, file_wf, q, atoms):
 
     return V
 
-def Energy(qcinput, file_wf, q, p, atoms, wmass):
+def Energy(qcinput, file_wf, q, p, atoms, wmass, active_state):
 
     qchem = qcinput['qchem']
 
@@ -43,7 +43,7 @@ def Energy(qcinput, file_wf, q, p, atoms, wmass):
     elif qchem == 'XTB':
         V = XTB_Energy(file_wf, q, atoms, qcinput) 
     elif qchem == 'PES':
-        V = PES_Energy(q)
+        V = PES_Energy(q, active_state)
     else:
         raise ValueError("Non-Existing Quantum Chemical method is input. Avaiable packages: Orca, PySCF, Sparrow, XTB")
 
@@ -52,7 +52,7 @@ def Energy(qcinput, file_wf, q, p, atoms, wmass):
     return(T, V, Etot)
 
 
-def force_calc(qcinput, q, atoms):
+def force_calc(qcinput, q, atoms, active_state=0):
     qchem = qcinput['qchem']
 
     if qchem == 'PySCF':
@@ -66,7 +66,7 @@ def force_calc(qcinput, q, atoms):
     elif qchem == 'XTB':
         force = XTB_Force(q, atoms, qcinput)
     elif qchem == 'PES':
-        force = PES_Force(q)
+        force = PES_Force(q, active_state)
     else:
         raise ValueError("Non-Existing Quantum Chemical method is input. Avaiable packages: Orca, PySCF, Sparrow, XTB")
 
