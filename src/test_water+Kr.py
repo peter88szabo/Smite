@@ -39,13 +39,13 @@ if __name__ == "__main__":
     reaction.num_states = 2
     reaction.active_state = 1
     reaction.Specify_Collision_Sampling(
-        Rini=7.0, bmax=3.0, bsampling=True, Ecoll=20.0, temp=300.0
+        Rini=4., bmax=1.0, bsampling=True, Ecoll=20.0, temp=100.0
     )
     reaction.sample_and_run_collision(
         integrator="rattle",
         maxstep=10000,
-        timestep=0.1,
-        iprint=1,
+        timestep=1,
+        iprint=4,
         pairs_to_stop=pairs_to_test,
         constrained_bonds=constrained_bonds,
         tol=1e-6,
