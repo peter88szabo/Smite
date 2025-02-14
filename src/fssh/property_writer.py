@@ -1,4 +1,7 @@
 import numpy as np
+from numpy._typing import NDArray
+
+c6 = 41.341105  # [fs]       * c6 = [time in au]
 
 
 class PropertyWriter:
@@ -10,14 +13,15 @@ class PropertyWriter:
     def write(
         self,
         epot: float,
-        c: np.ndarray,
+        c: NDArray,
         step: int,
         dt_class: float,
         active_state: int,
-        coupling: np.ndarray,
+        coupling: NDArray,
     ):
         rho = self._calculate_density_matrix(c)
         d_max = np.real(coupling.max())
+        dt_class = dt_class / c6 # time in [fs]
 
         if self.header == 0:
             header = self._create_header(rho)
@@ -30,7 +34,7 @@ class PropertyWriter:
 
         self.file.flush()
 
-    def _calculate_density_matrix(self, c: np.ndarray):
+    def _calculate_density_matrix(self, c: NDArray):
         """This is an implementation that is not appropriate for long dynamics simulations"""
         rho = np.zeros((c.shape[0], c.shape[0]), dtype=float)
 
