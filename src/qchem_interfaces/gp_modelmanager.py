@@ -25,7 +25,7 @@ class ModelManager:
             )
 
         model_list = os.listdir(model_directory)
-        model_list = [Path(model) for model in model_list]
+        model_list = sorted([Path(model) for model in model_list])
 
         for model in model_list:
             if model.suffix == ".pt" or model.suffix == ".pth":
