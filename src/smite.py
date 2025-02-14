@@ -190,7 +190,7 @@ class Molecule:
 
     ##wave function file should be generated automatically based on the name of molecule
     #as it given in the qcinput dictionary
-    def get_energy(self, file_wf=None):
+    def get_energy(self, file_wf=None) -> tuple[float,float,float]:
         check = False
         if file_wf is None and self.qchem['wfu']:
             file_wf = 'garbage_wavefunc_file.txt'
