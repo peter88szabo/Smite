@@ -235,10 +235,18 @@ class Molecule:
     def thermo_andersen(self, prob, dt, Ttarg):
         self.p = thermo_andersen(self.nfix, self.p, self.wmass, dt, prob, Ttarg)
 
-    def fssh(self, dt, dtq: Optional[float] = None, **kwargs):
+    def fssh(self, dt, **kwargs):
+        if 'dtq' in kwargs:
+            dtq = kwargs['dtq']
+        else:
+            dtq = None
+        if 'de_cutoff' in kwargs:
+            de_cutoff = kwargs['de_cutoff']
+        else:
+            de_cutoff = 0.5
         if self.c is None:
             self.c = initialize_amplitudes(self.num_states, self.active_state)
-        self.p, self.c, self.active_state, self.d = fssh_propagate(dt, self.active_state, self.num_states, self.q, self.p, self.wmass, self.c, dtq=dtq, **kwargs)
+        self.p, self.c, self.active_state, self.d = fssh_propagate(dt, self.active_state, self.num_states, self.q, self.p, self.wmass, self.c, de_cutoff=de_cutoff, dtq=dtq)
 
 
     def run_trajectory(self, integrator='verlet',
@@ -404,7 +412,7 @@ class Molecule:
                     raise ValueError("Non existing integrator. You can choose from: leapfrog, verlet, rk4, symplectic(4,6,8) and predcorr(order)")
 
                 if self.num_states > 1:
-                    self.fssh(dt)
+                    self.fssh(dt, **kwargs)
                     property_writer.write(
                         self.get_energy()[1],
                         self.c,
