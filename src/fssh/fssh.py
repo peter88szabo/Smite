@@ -122,11 +122,13 @@ def _get_couplings(
         grad = -PES_Force(
             q, states
         )  # TODO: These should be generally implemented for any qc method
-        grad = grad.reshape(num_states, n_atoms, n_dof) # reshape for nac calc
+        grad = grad.reshape(num_states, n_atoms, n_dof)  # reshape for nac calc
         hess = PES_Hessian(
             q, states
         )  # TODO: This should be generally implemented for any qc method
-        hess = hess.reshape(num_states, n_atoms * n_dof, n_atoms * n_dof) # reshape for nac calc
+        hess = hess.reshape(
+            num_states, n_atoms * n_dof, n_atoms * n_dof
+        )  # reshape for nac calc
     else:
         grad = None
         hess = None

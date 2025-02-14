@@ -2,12 +2,20 @@ import numpy as np
 
 
 class PropertyWriter:
-    def __init__(self, filename='properties.csv'):
+    def __init__(self, filename="properties.csv"):
         self.filename = filename
-        self.file = open(self.filename, 'w', buffering=1)
+        self.file = open(self.filename, "w", buffering=1)
         self.header = 0
 
-    def write(self, epot: float, c: np.ndarray, step: int, dt_class: float, active_state: int, coupling: np.ndarray):
+    def write(
+        self,
+        epot: float,
+        c: np.ndarray,
+        step: int,
+        dt_class: float,
+        active_state: int,
+        coupling: np.ndarray,
+    ):
         rho = self._calculate_density_matrix(c)
         d_max = np.real(coupling.max())
 
@@ -17,7 +25,8 @@ class PropertyWriter:
             self.header = 1
 
         self.file.write(
-            f"{step},{step * dt_class},{','.join([str(i) for i in rho.ravel().tolist()])},{active_state},{d_max},{epot}\n")
+            f"{step},{step * dt_class},{','.join([str(i) for i in rho.ravel().tolist()])},{active_state},{d_max},{epot}\n"
+        )
 
         self.file.flush()
 
@@ -36,7 +45,7 @@ class PropertyWriter:
         header = []
         for i in range(rho.shape[0]):
             for j in range(rho.shape[1]):
-                header.append(f'c{i}{j}')
+                header.append(f"c{i}{j}")
 
         return header
 

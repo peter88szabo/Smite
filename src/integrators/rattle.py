@@ -53,7 +53,7 @@ def rattle(
         constrained_bonds = np.array(constrained_bonds)
 
     # Transform coordinates and mass arrays into 2D matrices
-    q, mass, p = q.reshape(-1,3), mass.reshape(-1,3), p.reshape(-1,3)
+    q, mass, p = q.reshape(-1, 3), mass.reshape(-1, 3), p.reshape(-1, 3)
 
     # Transform momenta to velocities to simplify the equations
     v = p / mass
@@ -62,7 +62,16 @@ def rattle(
 
     # RATTLE update
     q_new, v_new = _propagate(
-        qcinput, mass, dt, q, v, atoms, active_state, fixed_internals, constrained_bonds, tol
+        qcinput,
+        mass,
+        dt,
+        q,
+        v,
+        atoms,
+        active_state,
+        fixed_internals,
+        constrained_bonds,
+        tol,
     )
 
     p_new = v_new * mass
@@ -144,7 +153,9 @@ def _propagate(
     v_t0 = v.copy()
 
     # Unconstrained step
-    q_dt, v_dt_half = leapfrog_halfstep(qcinput, active_state, mass, dt, q_t0, v_t0, atoms)
+    q_dt, v_dt_half = leapfrog_halfstep(
+        qcinput, active_state, mass, dt, q_t0, v_t0, atoms
+    )
 
     q_constraints, v_constraints = (
         np.zeros(len(constrained_bonds)),
@@ -159,7 +170,9 @@ def _propagate(
     )
 
     # Second half-step to update the velocities with the force calculated with the new t+dt coords
-    _, v_dt = leapfrog_halfstep(qcinput, active_state, mass, dt, q_dt_corr, v_dt_half, atoms)
+    _, v_dt = leapfrog_halfstep(
+        qcinput, active_state, mass, dt, q_dt_corr, v_dt_half, atoms
+    )
 
     # Determine the constraints on the velocities for the new coordinates
     v_constraints = update_velocity_constraints(
@@ -209,7 +222,7 @@ def leapfrog_halfstep(
 
     q_dt_arr = q_dt.reshape(q.shape[0] * 3)
     f = force_calc(qcinput, q_dt_arr, atoms, active_state)
-    f = f.reshape(-1,3)
+    f = f.reshape(-1, 3)
 
     v_dt_half += 1 / (2 * mass) * dt * f  # Half-step
     q_dt += dt * v_dt_half
@@ -466,7 +479,10 @@ def eta_iterate(
 
 @jit(nopython=True)
 def update_distance_constraints(
-    q_dt: NDArray[float64], fixed_internals: NDArray[float64], constraints: NDArray[float64], constrained_bonds: NDArray[float64]
+    q_dt: NDArray[float64],
+    fixed_internals: NDArray[float64],
+    constraints: NDArray[float64],
+    constrained_bonds: NDArray[float64],
 ) -> np.ndarray:
     """
     Update all distance constraints as specified by the bonds dictionary.
