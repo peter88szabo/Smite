@@ -28,7 +28,7 @@ def Potential_Energy(qcinput, file_wf, q, atoms):
 
     return V
 
-def Energy(qcinput, file_wf, q, p, atoms, wmass, active_state):
+def Energy(qcinput, file_wf, q, p, atoms, wmass, active_state) -> tuple[float,float,float]:
 
     qchem = qcinput['qchem']
 
@@ -49,7 +49,7 @@ def Energy(qcinput, file_wf, q, p, atoms, wmass, active_state):
 
     T = sum(0.5*np.array(p)*np.array(p)/np.array(wmass))
     Etot = T+V
-    return(T, V, Etot)
+    return T, V, Etot
 
 
 def force_calc(qcinput, q, atoms, active_state=0):
