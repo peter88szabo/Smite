@@ -8,7 +8,6 @@ from qchem_interfaces.gp_pes import PES_Energy, PES_Force, PES_Hessian
 from .baeck_an_nac import calculate_nac
 
 
-# TODO: An implementation that receives a Molecule object would be more general
 def propagate(
     dtc: float,
     active_state: int,
@@ -493,6 +492,14 @@ def _rescale_velocity(
 
     v = v - gamma * d_ah / m
 
+    # Check if v contains complex values.
+    # Will result in error if passed to RATTLE containing complex values.
+    if np.iscomplexobj(v):
+        if not v.imag.any(): # Check if all imaginary parts are zero, they should be
+            v = v.real
+        else:
+            raise TypeError("Velocity array contains complex typed values which has non-zero imaginary parts.")
+
     return v, active_state
 
 
@@ -526,8 +533,8 @@ def _check_reverse_velocity(
         True if the velocity vector is reflected, False otherwise.
     """
 
-    force1 = PES_Force(q, active_state)
-    force2 = PES_Force(q, hopped_state)
+    force1 = PES_Force(q, active_state).reshape(-1,3)
+    force2 = PES_Force(q, hopped_state).reshape(-1,3)
 
     fd1 = np.sum(force1 * d_ah)
     fd2 = np.sum(force2 * d_ah)
