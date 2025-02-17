@@ -45,8 +45,7 @@ from integrators.symplectic       import Symplectic
 from integrators.sprk             import SPRK
 from integrators.predcorr         import PredCorr 
 from integrators.gradient         import Energy
-from integrators.rattle import rattle
-
+from integrators.rattle import Rattle
 
 from thermostats.randmomentum     import random_initialize_momenta
 from thermostats.berendsen        import thermo_berendsen 
@@ -226,8 +225,8 @@ class Molecule:
     def predcorr_single_step(self, dt, this_class):
         self.q, self.p = this_class.predcorr(self.qchem, dt, self.wmass, self.q, self.p, self.atoms)
 
-    def rattle_single_step(self, dt, **kwargs):
-        self.q, self.p = rattle(self.qchem, dt, self.wmass, self.q, self.p, self.atoms, self.active_state, **kwargs)
+    def rattle_single_step(self, dt, this_class, tol):
+        self.q, self.p = this_class.rattle(self.qchem, dt, self.wmass, self.q, self.p, self.atoms, self.active_state, tol)
 
     def thermo_berendsen(self, tau, dt, Ttarg):
         self.p = thermo_berendsen(self.nfix, self.p, self.wmass, dt, tau, Ttarg)
@@ -265,6 +264,8 @@ class Molecule:
                              thermo_param=None,
                              thermo_temp=None,
                              spectrum=False,
+                             constrained_bonds=None,
+                             tol=1e-8,
                              **kwargs
                        ):
 
@@ -327,6 +328,8 @@ class Molecule:
             propag = Symplectic(integrator_order)
         if integrator == 'sprk':
             propag = SPRK(integrator_order)
+        if integrator == 'rattle':
+            propag = Rattle(self.q, constrained_bonds)
 
         property_writer = PropertyWriter()
 
@@ -406,7 +409,7 @@ class Molecule:
                 elif integrator == 'sprk':
                     self.sprk_single_step(dt, propag)
                 elif integrator == 'rattle':
-                    self.rattle_single_step(dt, **kwargs)
+                    self.rattle_single_step(dt, propag, tol)
 
                 else:
                     raise ValueError("Non existing integrator. You can choose from: leapfrog, verlet, rk4, symplectic(4,6,8) and predcorr(order)")
@@ -770,7 +773,7 @@ class Fragment(Molecule):
 
     def sample_and_run_trajectory(self, integrator='verlet', integrator_order=4, timestep=1.0, startstep=0, maxstep=100, iprint=1,
                                   traj_file=None, backfile=None, Rstop=None, pairs_to_stop=None,
-                                  thermostat=None, thermo_param=None, thermo_temp=None, spectrum=False):
+                                  thermostat=None, thermo_param=None, thermo_temp=None, spectrum=False, constrained_bonds=None, tol=1e-8, **kwargs):
 
         if traj_file is None:
             traj_file = 'traj_' + self.fname + '.xyz' 
@@ -796,7 +799,7 @@ class Fragment(Molecule):
 
         self.run_trajectory(integrator=integrator, integrator_order=integrator_order, timestep=timestep, startstep=startstep, maxstep=maxstep,
                             iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=False,
-                            Rstop=Rstop, pairs_to_stop=pairs_to_stop, thermostat=thermostat, thermo_param=thermo_param, thermo_temp=thermo_temp, spectrum=spectrum)
+                            Rstop=Rstop, pairs_to_stop=pairs_to_stop, thermostat=thermostat, thermo_param=thermo_param, thermo_temp=thermo_temp, spectrum=spectrum, constrained_bonds=constrained_bonds, tol=tol, **kwargs)
 
 
     def print_mode_sampling(self):

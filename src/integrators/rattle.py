@@ -1,84 +1,91 @@
+from typing import Any
+
 import numpy as np
 from numba import jit
-from numpy._typing import NDArray
-from numpy import float64
+from numpy._typing import NDArray, _64Bit
+from numpy import float64, ndarray, dtype, floating
 
 from integrators.gradient import force_calc
 
+class Rattle:
+    def __init__(self, q_init, constrained_bonds):
+        if constrained_bonds is None:
+            raise NotImplementedError("The constrained bonds are not specified.")
+        if isinstance(constrained_bonds, list):
+            constrained_bonds = np.array(constrained_bonds)
+        if len(q_init.shape) == 1:
+            q_init = q_init.reshape(-1,3)
 
-def rattle(
-    qcinput: dict,
-    dt: float,
-    mass: NDArray[float64],
-    q: NDArray[float64],
-    p: NDArray[float64],
-    atoms: list,
-    active_state: int,
-    constrained_bonds: list[tuple] | list[list] | NDArray[float64],
-    tol: float = 1e-8,
-) -> tuple[NDArray[float64], NDArray[float64]]:
-    """
-    The RATTLE algorithm for performing molecular dynamics with holonomic constraints.
-    Only implemented for constrained bonds, not angles.
-    The implementation is derived from:
-    RATTLE Recipe for General Holonomic Constraints: Angle and Torsion Constraints, R. Kutteh
+        self.q_init = q_init
+        self.constrained_bonds = constrained_bonds
+        self.fixed_internals = _generate_fixed_internals(q_init, constrained_bonds)
 
-    Parameters
-    ----------
-    qcinput : dict
-        The input dictionary containing the quantum chemical information.
-    dt : float
-        The time step.
-    mass : NDArray[float64]
-        The mass of the atoms.
-    q : NDArray[float64]
-        The positions.
-    p : NDArray[float64]
-        The momenta.
-    atoms : list
-        The list of atoms.
-    constrained_bonds : list[list] | NDArray[float64]
-        The constrained bonds.
-    tol : float
-        The tolerance for the constraints.
+    def rattle(self,
+        qcinput: dict,
+        dt: float,
+        mass: NDArray[float64],
+        q: NDArray[float64],
+        p: NDArray[float64],
+        atoms: list,
+        active_state: int,
+        tol: float = 1e-8,
+    ) -> tuple[NDArray[float64], NDArray[float64]]:
+        """
+        The RATTLE algorithm for performing molecular dynamics with holonomic constraints.
+        Only implemented for constrained bonds, not angles.
+        The implementation is derived from:
+        RATTLE Recipe for General Holonomic Constraints: Angle and Torsion Constraints, R. Kutteh
 
-    Returns
-    -------
-    tuple[NDArray[float64], NDArray[float64]]
-        The updated positions and momenta.
-    """
-    if constrained_bonds is None:
-        raise NotImplementedError("The constrained bonds are not specified.")
-    if isinstance(constrained_bonds, list):
-        constrained_bonds = np.array(constrained_bonds)
+        Parameters
+        ----------
+        qcinput : dict
+            The input dictionary containing the quantum chemical information.
+        dt : float
+            The time step.
+        mass : NDArray[float64]
+            The mass of the atoms.
+        q : NDArray[float64]
+            The positions.
+        p : NDArray[float64]
+            The momenta.
+        atoms : list
+            The list of atoms.
+        constrained_bonds : list[list] | NDArray[float64]
+            The constrained bonds.
+        tol : float
+            The tolerance for the constraints.
 
-    # Transform coordinates and mass arrays into 2D matrices
-    q, mass, p = q.reshape(-1, 3), mass.reshape(-1, 3), p.reshape(-1, 3)
+        Returns
+        -------
+        tuple[NDArray[float64], NDArray[float64]]
+            The updated positions and momenta.
+        """
 
-    # Transform momenta to velocities to simplify the equations
-    v = p / mass
+        # Transform coordinates and mass arrays into 2D matrices
+        q, mass, p = q.reshape(-1, 3), mass.reshape(-1, 3), p.reshape(-1, 3)
 
-    fixed_internals = _generate_fixed_internals(q, constrained_bonds)
+        # Transform momenta to velocities to simplify the equations
+        v = p / mass
 
-    # RATTLE update
-    q_new, v_new = _propagate(
-        qcinput,
-        mass,
-        dt,
-        q,
-        v,
-        atoms,
-        active_state,
-        fixed_internals,
-        constrained_bonds,
-        tol,
-    )
+        # RATTLE update
+        q_new, v_new = _propagate(
+            qcinput,
+            mass,
+            dt,
+            q,
+            v,
+            atoms,
+            active_state,
+            self.fixed_internals,
+            self.constrained_bonds,
+            tol,
+        )
 
-    p_new = v_new * mass
+        p_new = v_new * mass
 
-    q_new, p_new = q_new.reshape(q.shape[0] * 3), p_new.reshape(p.shape[0] * 3)
+        q_new, p_new = q_new.reshape(q.shape[0] * 3), p_new.reshape(p.shape[0] * 3)
 
-    return q_new, p_new
+        return q_new, p_new
 
 
 def _generate_fixed_internals(
@@ -119,7 +126,7 @@ def _propagate(
     fixed_internals: NDArray[float64],
     constrained_bonds: NDArray[float64],
     tol: float,
-) -> list[NDArray[float64], NDArray[float64]]:
+) -> tuple[ndarray[Any, dtype[float64]], ndarray[Any, dtype[float64]]]:
     """
     Propagate the positions and velocities using the RATTLE algorithm.
 
