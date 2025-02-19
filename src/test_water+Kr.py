@@ -1,6 +1,13 @@
-if __name__ == "__main__":
-    import random
-    from smite import Molecule, Fragment, Collision
+import random
+from smite import Molecule, Fragment, Collision
+from qchem_interfaces.gp_modelmanager import get_modelmanager
+from pathlib import Path
+import os
+
+def main():
+    manager = get_modelmanager()
+    manager.set_model_directory("/home/jenne/repos/Smite/peslib/H2O+Kr+")
+    manager.load_models_from_directory()
 
     xyz_water = """
     O      0.000000    0.000000    0.000000
@@ -50,3 +57,7 @@ if __name__ == "__main__":
         constrained_bonds=constrained_bonds,
         tol=1e-6,
     )
+
+if __name__ == "__main__":
+    main()
+

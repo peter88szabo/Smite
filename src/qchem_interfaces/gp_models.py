@@ -173,12 +173,9 @@ class GPModel:
             raise ValueError(f"The specified state {state} is not available.")
         return state
 
-
-_manager = get_modelmanager()
-_models = _manager.get_models()
-_gpmodel = GPModel(_models)
-
-
 # Implicit singleton implementation through the Python module system
 def get_gpmodel():
-    return _gpmodel
+    manager = get_modelmanager()
+    models_list = manager.get_models()
+    gpmodel = GPModel(models_list)
+    return gpmodel
