@@ -7,7 +7,7 @@ from qchem_interfaces.sparrowpy   import SparrowPy_Force, SparrowPy_Energy
 from qchem_interfaces.xtbrun      import XTB_Force, XTB_Energy
 from qchem_interfaces.gp_pes      import PES_Force, PES_Energy
 
-def Potential_Energy(qcinput, file_wf, q, atoms):
+def Potential_Energy(qcinput, file_wf, q, atoms, active_state=0):
 
     qchem = qcinput['qchem']
 
@@ -22,13 +22,13 @@ def Potential_Energy(qcinput, file_wf, q, atoms):
     elif qchem == 'XTB':
         V = XTB_Energy(file_wf, q, atoms, qcinput)
     elif qchem == 'PES':
-        V = PES_Energy(q)
+        V = PES_Energy(q, active_state)
     else:
         raise ValueError("Non-Existing Quantum Chemical method is input. Avaiable packages: Orca, PySCF, Sparrow, XTB")
 
     return V
 
-def Energy(qcinput, file_wf, q, p, atoms, wmass, active_state) -> tuple[float,float,float]:
+def Energy(qcinput, file_wf, q, p, atoms, wmass, active_state=0) -> tuple[float,float,float]:
 
     qchem = qcinput['qchem']
 
@@ -37,11 +37,11 @@ def Energy(qcinput, file_wf, q, p, atoms, wmass, active_state) -> tuple[float,fl
     elif qchem == 'Orca':
         V = Orca_Energy(file_wf, q, atoms, qcinput)
     elif qchem == 'Sparrow_Py':
-        V = SparrowPy_Energy(file_wf, q, atoms, qcinput) 
+        V = SparrowPy_Energy(file_wf, q, atoms, qcinput)
     elif qchem == 'Sparrow_bin':
-        V = Sparrowbin_Energy(file_wf, q, atoms, qcinput) 
+        V = Sparrowbin_Energy(file_wf, q, atoms, qcinput)
     elif qchem == 'XTB':
-        V = XTB_Energy(file_wf, q, atoms, qcinput) 
+        V = XTB_Energy(file_wf, q, atoms, qcinput)
     elif qchem == 'PES':
         V = PES_Energy(q, active_state)
     else:
