@@ -204,7 +204,7 @@ class Molecule:
             
         return T, V, E 
 
-    def instantiate_propagator(self, integrator, integrator_order) -> Optional[object]:
+    def instantiate_propagator(self, integrator: str, integrator_order: int) -> Optional[object]:
         propagators = {
             "predcorr": PredCorr(integrator_order, len(self.q)),
             "symplectic": Symplectic(integrator_order),
@@ -215,7 +215,7 @@ class Molecule:
         else:
             return None
 
-    def step(self, integrator, dt, propag: Optional[object] = None) -> None:
+    def step(self, integrator: str, dt: float, propag: Optional[object] = None) -> None:
         integrators = {
         "leafrog": leapfrog,
         "verlet": velverlet,
@@ -235,28 +235,28 @@ class Molecule:
 
     def thermostat_step(
         self,
-        thermostat,
-        dt,
-        thermo_param,
-        thermo_temp,
+        thermostat: Optional[str],
+        dt: float,
+        thermo_param: Optional[float],
+        thermo_temp: Optional[float],
     ) -> None:
         thermostats = ["berendsen", "andersen"]
 
-        if thermostat is not None and (thermo_param or thermo_temp) is None:
-            raise ValueError(
-                "Since thermostate is switched on the parameter and temperature must be given"
-            )
-        if thermostat not in thermostats:
-            raise ValueError(
-                "Non existing thermostat. You can choose from: berendsen, and andersen"
-            )
-        else:
-
-            if thermostat == "berendsen":
-                tau = thermo_param * 41.341105 #from fs to atomic time unit
-                self.p = thermo_berendsen(self.nfix, self.p, self.wmass, dt, tau, thermo_temp)
-            if thermostat == 'andersen':
-                self.p = thermo_andersen(self.nfix, self.p, self.wmass, dt, thermo_param, thermo_temp)
+        if thermostat is not None:
+            if thermo_param or thermo_temp is None:
+                raise ValueError(
+                    "Since thermostate is switched on the parameter and temperature must be given"
+                )
+            elif thermostat not in thermostats:
+                raise ValueError(
+                    "Non existing thermostat. You can choose from: berendsen, and andersen"
+                )
+            else:
+                if thermostat == "berendsen":
+                    tau = thermo_param * 41.341105 #from fs to atomic time unit
+                    self.p = thermo_berendsen(self.nfix, self.p, self.wmass, dt, tau, thermo_temp)
+                if thermostat == 'andersen':
+                    self.p = thermo_andersen(self.nfix, self.p, self.wmass, dt, thermo_param, thermo_temp)
 
     def fssh(self, dt, **kwargs):
         if 'dtq' in kwargs:
