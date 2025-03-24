@@ -1,8 +1,10 @@
-import numpy as np
-from integrators.gradient import force_calc 
+from numpy._typing import NDArray
+
+from integrators.gradient import force_calc
+
 
 class SPRK:
-    def __init__(self, order):
+    def __init__(self, order: int):
         """
         Initialize the SPRK Integrator with the desired order.
 
@@ -16,27 +18,38 @@ class SPRK:
         elif order == 4:
             # Forest-Ruth (4th Order)
             self.a_coeffs = [
-                0.6756035959798289, -0.1756035959798288,
-                -0.1756035959798288, 0.6756035959798289
+                0.6756035959798289,
+                -0.1756035959798288,
+                -0.1756035959798288,
+                0.6756035959798289,
             ]
             self.b_coeffs = [
-                0.0, 1.3512071919596578,
-                -1.7024143839193156, 1.3512071919596578
+                0.0,
+                1.3512071919596578,
+                -1.7024143839193156,
+                1.3512071919596578,
             ]
         else:
             raise ValueError("Unsupported order. Choose 2, 4, 6, or 8.")
 
         self.order = order
 
-    def sprk(self, qcinput, dt, wmass, q, p, atoms):
+    def __call__(
+        self,
+        qcinput: dict,
+        dt: float,
+        wmass: NDArray,
+        q: NDArray,
+        p: NDArray,
+        atoms: list[str],
+    ) -> tuple[NDArray, NDArray]:
         num_stages = len(self.a_coeffs)
 
         for stage in range(num_stages):
-            force = force_calc(qcinput, q, atoms)  
+            force = force_calc(qcinput, q, atoms)
             p = p + self.b_coeffs[stage] * force * dt
-            
+
             # Update position using coefficient a
             q = q + self.a_coeffs[stage] * p / wmass * dt
 
-        return (q, p)
-
+        return q, p
