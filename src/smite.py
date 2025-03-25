@@ -1049,7 +1049,11 @@ class Fragment(Molecule):
         thermo_param=None,
         thermo_temp=None,
         spectrum=False,
-        **kwargs,
+        q_integrator=None,
+        q_timestep=None,
+        de_cutoff=None,
+        tolerance=None,
+        **kwargs
     ):
         if traj_file is None:
             traj_file = "traj_" + self.fname + ".xyz"
@@ -1062,9 +1066,9 @@ class Fragment(Molecule):
         if self.natom == 1:
             self.Atom_Sampling()
         elif self.natom == 2:
-            self.Diatom_Sampling()
+            self.Diatom_Sampling(**kwargs)
         elif self.natom > 2:
-            self.Polyatom_Sampling()
+            self.Polyatom_Sampling(**kwargs)
         else:
             raise ValueError(
                 "Wrong sampling option in sample_and_run_trajectory() function"
@@ -1092,6 +1096,10 @@ class Fragment(Molecule):
             thermo_param=thermo_param,
             thermo_temp=thermo_temp,
             spectrum=spectrum,
+            q_integrator=q_integrator,
+            q_timestep=q_timestep,
+            de_cutoff=de_cutoff,
+            tolerance=tolerance,
         )
 
     def print_mode_sampling(self):
@@ -1612,7 +1620,7 @@ class Collision(Molecule):
         com_dist = np.linalg.norm(np.array(comA) - np.array(comB))
         return com_dist
 
-    def Sample_Bimolecular_Reactants(self, **kwargs):
+    def Sample_Bimolecular_Reactants(self,**kwargs):
         # ---------------------------------------------
         # Sample the internal motions of a fragment:
         # ---------------------------------------------
@@ -1657,7 +1665,11 @@ class Collision(Molecule):
         pairs_to_stop=None,
         Rstop=None,
         spectrum=False,
-        **kwargs,
+        q_integrator=None,
+        q_timestep=None,
+        de_cutoff=None,
+        tolerance=None,
+        **kwargs
     ):
         if traj_file is None:
             traj_file = (
@@ -1698,11 +1710,15 @@ class Collision(Molecule):
             Rstop=Rstop,
             pairs_to_stop=pairs_to_stop,
             spectrum=spectrum,
-            **kwargs,
+            q_integrator=q_integrator,
+            q_timestep=q_timestep,
+            de_cutoff=de_cutoff,
+            tolerance=tolerance,
         )
 
     def multi_paralell_traj_sample_and_run_collision(
         self,
+        ntraj=1,
         slurm=False,
         cores_per_traj=1,
         integrator="verlet",
@@ -1755,28 +1771,6 @@ class Collision(Molecule):
             f"Total cores to use: {total_cores}, Cores per trajectory: {cores_per_traj}"
         )
 
-        with ProcessPoolExecutor(max_workers=max_workers) as executor:
-            futures = [
-                executor.submit(
-                    run_single_trajectory,
-                    self,
-                    itraj,
-                    traj_file,
-                    backfile,
-                    integrator,
-                    integrator_order,
-                    timestep,
-                    startstep,
-                    maxstep,
-                    iprint,
-                    restart,
-                    pairs_to_stop,
-                    Rstop,
-                    spectrum,
-                    **kwargs,
-                )
-                for itraj in range(ntraj)
-            ]
         with ProcessPoolExecutor(max_workers=max_traj) as executor:
             futures = [
                 executor.submit(
@@ -1821,7 +1815,10 @@ class Collision(Molecule):
         pairs_to_stop=None,
         Rstop=None,
         spectrum=False,
-        **kwargs,
+        q_integrator=None,
+        q_timestep=None,
+        de_cutoff=None,
+        tolerance=None,
     ):
         if traj_file is None:
             traj_file = (
@@ -1852,7 +1849,7 @@ class Collision(Molecule):
             # Amit meg meg kell oldalni, hogy a orca_tmp-t vagy mas tmp-t is odategyuk
             # meg a vibracios filokat is
             # meg masoljuk a hessiant be ebbe a file-ba
-            self.Sample_Bimolecular_Reactants(**kwargs)
+            self.Sample_Bimolecular_Reactants()
 
             self.run_trajectory(
                 integrator=integrator,
@@ -1868,4 +1865,8 @@ class Collision(Molecule):
                 Rstop=Rstop,
                 pairs_to_stop=pairs_to_stop,
                 spectrum=spectrum,
+                q_integrator=q_integrator,
+                q_timestep=q_timestep,
+                de_cutoff=de_cutoff,
+                tolerance=tolerance,
             )
