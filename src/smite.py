@@ -52,11 +52,11 @@ from thermostats.berendsen        import thermo_berendsen
 from thermostats.andersen         import thermo_andersen 
 #from thermostats.nosehoover       import NoseHoover
 
-from fssh.initialize_amplitudes   import initialize_amplitudes
-from fssh.fssh                    import propagate as fssh_propagate
+from fssh.fssh                    import propagate as fssh_propagate, FSSH
+
 
 class Molecule:
-    def __init__(self, atoms=None, mass=None, q_ini=None, p_ini=None, nfix=0, restart=False, xyz_file_path=None, constrained_bonds=None):
+    def __init__(self, atoms=None, mass=None, q_ini=None, p_ini=None, nfix=0, restart=False, xyz_file_path=None, constrained_bonds=None, num_states: int = 1, active_state: int = 0):
         if restart:
             if not xyz_file_path:
                 raise ValueError("Backup file must be provided when restart is True.")
@@ -90,13 +90,9 @@ class Molecule:
         self.vini       = None #the initial (sampled) pot energy which is likely out of equilibrium
         self.tini       = None
         self.vsave      = []
-        self.num_states = 1
-        self.active_state = None
-        self.c          = None # quantum amplitudes
-        self.d          = None # Non-adiabatic coupling
-        self.dtq        = None # Quantum time step
+        self.num_states = num_states
+        self.active_state = active_state
         self.constrained_bonds = constrained_bonds
-
 
     def save_velocity_and_distance_matrix(self):
         #mass weighted velcity u = M^1/2 * v
@@ -204,33 +200,46 @@ class Molecule:
             
         return T, V, E 
 
-    def instantiate_propagator(self, integrator: str, integrator_order: int) -> Optional[object]:
+    def instantiate_propagator(self, integrator: str, integrator_order: int, tolerance) -> Optional[object]:
         propagators = {
             "predcorr": PredCorr(integrator_order, len(self.q)),
             "symplectic": Symplectic(integrator_order),
-            "sprk": SPRK(integrator_order)
+            "sprk": SPRK(integrator_order),
+            "rattle": Rattle(self.q, self.constrained_bonds, tolerance)
         }
         if integrator in propagators:
             return propagators[integrator]
         else:
             return None
 
+    def instantiate_quantum_propagator(self, q_integrator: str, de_cutoff: Optional[float] = None) -> Optional[object]:
+        q_propagators = {
+            "fssh": FSSH(self.num_states, self.active_state, de_cutoff)
+        }
+        if q_integrator in q_propagators:
+            if self.num_states < 2:
+                raise ValueError("Number of states must be greater than 1 for quantum propagation")
+            return q_propagators[q_integrator]
+        else:
+            return None
+
     def step(self, integrator: str, dt: float, propag: Optional[object] = None) -> None:
         integrators = {
-        "leafrog": leapfrog,
+        "leapfrog": leapfrog,
         "verlet": velverlet,
         "rk4": rk4,
         "stormer": stormer_verlet,
         "symplectic": propag,
         "sprk": propag,
-        "predcorr": propag
+        "predcorr": propag,
+        "rattle": propag
         }
 
         if integrator not in integrators:
             raise ValueError("Non existing integrator. You can choose from: leapfrog, verlet, rk4, stormer, symplectic, sprk, and predcorr")
         else:
             self.q, self.p = integrators[integrator](
-                self.qchem, dt, self.wmass, self.q, self.p, self.atoms
+                self.qchem, dt, self.wmass, self.q, self.p, self.atoms, self.active_state
             )
 
     def thermostat_step(
@@ -258,18 +267,15 @@ class Molecule:
                 if thermostat == 'andersen':
                     self.p = thermo_andersen(self.nfix, self.p, self.wmass, dt, thermo_param, thermo_temp)
 
-    def fssh(self, dt, **kwargs):
-        if 'dtq' in kwargs:
-            dtq = kwargs['dtq']
-        else:
-            dtq = None
-        if 'de_cutoff' in kwargs:
-            de_cutoff = kwargs['de_cutoff']
-        else:
-            de_cutoff = 0.5
-        if self.c is None:
-            self.c = initialize_amplitudes(self.num_states, self.active_state)
-        self.p, self.c, self.active_state, self.d = fssh_propagate(dt, self.active_state, self.num_states, self.q, self.p, self.wmass, self.c, de_cutoff=de_cutoff, dtq=dtq)
+    def q_step(self, q_integrator, dt, dtq, q_propag):
+        q_integrators = {
+            "fssh": q_propag
+        }
+        if q_integrator is not None:
+            if q_integrator in q_integrators:
+                self.p, self.active_state = q_integrators[q_integrator](dt, self.active_state, self.num_states, self.q, self.p, self.wmass, dtq=dtq)
+            else:
+                raise ValueError("Non existing quantum integrator. You can choose from: fssh")
 
     def run_trajectory(self, integrator='verlet',
                              integrator_order=4,
@@ -287,7 +293,10 @@ class Molecule:
                              thermo_param=None,
                              thermo_temp=None,
                              spectrum=False,
-                             **kwargs
+                             q_integrator=None,
+                             q_timestep=None,
+                             de_cutoff=None,
+                             tolerance=None,
                        ):
 
         wf_dir = "wavefunction_along_trajectory"
@@ -336,6 +345,7 @@ class Molecule:
         c7   = 2625.5                # [Hartree]  * c7 = [kJ/mol]
 
         dt = timestep * c6
+        dtq = q_timestep * c6 if q_timestep is not None else q_timestep
         tstop = False
         Rcom_min = 1000000.0
 
@@ -343,7 +353,8 @@ class Molecule:
             if self.Rstop < self.Rini:
                 raise ValueError("Rstop must be larger than Rini")
 
-        propag = self.instantiate_propagator(integrator, integrator_order)
+        propag = self.instantiate_propagator(integrator, integrator_order, tolerance)
+        q_propag = self.instantiate_quantum_propagator(q_integrator, de_cutoff)
         property_writer = PropertyWriter()
 
         with open(traj_file, "a") as file_trj:
@@ -406,17 +417,9 @@ class Molecule:
 
                 self.step(integrator, dt, propag)
                 self.thermostat_step(thermostat, dt, thermo_param, thermo_temp)
-
-                if self.num_states > 1:
-                    self.fssh(dt, **kwargs)
-                    property_writer.write(
-                        self.get_energy()[1],
-                        self.c,
-                        istep,
-                        dt,
-                        self.active_state,
-                        self.d
-                    )
+                self.q_step(q_integrator, dt, dtq, q_propag)
+                if q_integrator is not None:
+                    property_writer.write(istep, V, dt, self.active_state, q_propag.c, q_propag.d)
                 if spectrum and thermostat is None:
                     self.save_velocity_and_distance_matrix()
 
@@ -528,9 +531,9 @@ class Molecule:
 
 
 class Fragment(Molecule):
-    def __init__(self, atoms, mass, q_ini, p_ini):
+    def __init__(self, atoms, mass, q_ini, p_ini, constrained_bonds: Optional[list[list[int]]] = None, num_states: int = 1, active_state: int = 0):
 
-        super().__init__(atoms=atoms, mass=mass, q_ini=q_ini, p_ini=p_ini)
+        super().__init__(atoms=atoms, mass=mass, q_ini=q_ini, p_ini=p_ini, constrained_bonds=constrained_bonds, num_states=num_states, active_state=active_state)
         self.hessian      = None
         self.Lmat         = None #Normal mode to Cartesian transformator (eigvec of Hessian)
         self.freq         = None
@@ -565,7 +568,7 @@ class Fragment(Molecule):
         return this 
 
     @classmethod
-    def Diatom_Init(cls, fname, atoms, req=None, omega=None, alpha=None, De=None, rigid=False, random_rot=True, diatom='harmonic', nfix=0):
+    def Diatom_Init(cls, fname, atoms, req=None, omega=None, alpha=None, De=None, rigid=False, random_rot=True, diatom='harmonic', nfix=0, constrained_bonds=None, num_states: int = 1, active_state: int = 0):
         if len(atoms) != 2:
             raise ValueError("ERROR: Diatom_Init accept only a diatomic molecule.")
 
@@ -617,7 +620,7 @@ class Fragment(Molecule):
 
     @classmethod
     def Polyatom_Init(cls, fname, qchem, xyz, nfix=0, linear=False, is_eckart=True, random_rot=True,
-            rigid=False, fromMD=False, surface=False, surf_3atom=None, Amp_modeanim=30.0, print_nmode=True):
+            rigid=False, fromMD=False, surface=False, surf_3atom=None, Amp_modeanim=30.0, print_nmode=True, constrained_bonds: list[list[int]] = None, num_states: int = 1, active_state: int = 0):
 
         natom, atoms, q_eq = parseXYZ(xyz)
         q_eq = np.array(q_eq) / 0.52917721092  #Angstrom to Bohr
@@ -632,7 +635,7 @@ class Fragment(Molecule):
 
         mass = get_mass_vector(atoms)
 
-        this = cls(atoms=atoms, mass=mass, q_ini=q_eq, p_ini=p_ini)
+        this = cls(atoms=atoms, mass=mass, q_ini=q_eq, p_ini=p_ini, constrained_bonds=constrained_bonds, num_states=num_states, active_state=active_state)
 
         this.fname      = fname
         this.qchem      = qchem
@@ -879,13 +882,28 @@ class Fragment(Molecule):
 
 
 class Collision(Molecule):
-    def __init__(self, fragment_A, fragment_B, qchem):
+    def __init__(self, fragment_A, fragment_B, qchem, num_states: Optional[int] = None, active_state: Optional[int] = None):
         atoms = fragment_A.atoms + fragment_B.atoms
         mass = np.append(fragment_A.mass, fragment_B.mass)
         q_ini = np.append(fragment_A.q_ini, fragment_B.q_ini)
         p_ini = np.append(fragment_A.p_ini, fragment_B.p_ini)
 
-        super().__init__(atoms=atoms, mass=mass, q_ini=q_ini, p_ini=p_ini)
+        fragment_B.constrained_bonds = [[i + len(fragment_A.atoms), j + len(fragment_A.atoms)] for i, j in fragment_B.constrained_bonds]
+        constrained_bonds = fragment_A.constrained_bonds + fragment_B.constrained_bonds
+
+        if num_states is None:
+            if fragment_A.num_states != fragment_B.num_states:
+                raise ValueError("Number of states of both fragments must be the same.")
+            else:
+                num_states = fragment_A.active_state
+
+        if active_state is None:
+            if fragment_A.active_state != fragment_B.active_state:
+                raise ValueError("Active states of both fragments must be the same.")
+            else:
+                active_state = fragment_A.active_state
+
+        super().__init__(atoms=atoms, mass=mass, q_ini=q_ini, p_ini=p_ini, constrained_bonds=constrained_bonds, num_states=num_states, active_state=active_state)
         self.qchem = qchem
         self.Rini = None
         self.bmax = None

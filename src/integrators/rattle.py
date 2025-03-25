@@ -8,7 +8,7 @@ from numpy import float64, ndarray, dtype, floating
 from integrators.gradient import force_calc
 
 class Rattle:
-    def __init__(self, q_init, constrained_bonds):
+    def __init__(self, q_init, constrained_bonds, tol=1e-8):
         if constrained_bonds is None:
             raise NotImplementedError("The constrained bonds are not specified.")
         if isinstance(constrained_bonds, list):
@@ -19,8 +19,9 @@ class Rattle:
         self.q_init = q_init
         self.constrained_bonds = constrained_bonds
         self.fixed_internals = _generate_fixed_internals(q_init, constrained_bonds)
+        self.tol = tol
 
-    def rattle(self,
+    def __call__(self,
         qcinput: dict,
         dt: float,
         mass: NDArray[float64],
@@ -28,7 +29,6 @@ class Rattle:
         p: NDArray[float64],
         atoms: list,
         active_state: int,
-        tol: float = 1e-8,
     ) -> tuple[NDArray[float64], NDArray[float64]]:
         """
         The RATTLE algorithm for performing molecular dynamics with holonomic constraints.
@@ -78,7 +78,7 @@ class Rattle:
             active_state,
             self.fixed_internals,
             self.constrained_bonds,
-            tol,
+            self.tol,
         )
 
         p_new = v_new * mass
