@@ -42,11 +42,12 @@ class SPRK:
         q: NDArray,
         p: NDArray,
         atoms: list[str],
+        active_state: int
     ) -> tuple[NDArray, NDArray]:
         num_stages = len(self.a_coeffs)
 
         for stage in range(num_stages):
-            force = force_calc(qcinput, q, atoms)
+            force = force_calc(qcinput, q, atoms, active_state)
             p = p + self.b_coeffs[stage] * force * dt
 
             # Update position using coefficient a

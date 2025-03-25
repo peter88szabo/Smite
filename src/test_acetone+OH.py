@@ -16,9 +16,11 @@ if __name__ == '__main__':
      H    -1.385390     0.652263    -2.417576
      '''
 
+    xtb = "/home/jenne/xtb-dist/bin/xtb"
+
     qcinput_doublet = {
     'qchem': 'XTB',
-    'path': '/home/peter/orca_6_0_0/xtb',
+    'path': xtb,
     'nproc': 4,
     'functional': '',
     'basis': '',
@@ -30,7 +32,7 @@ if __name__ == '__main__':
 
     qcinput_singlet = {
     'qchem': 'XTB',
-    'path': '/home/peter/orca_6_0_0/xtb',
+    'path': xtb,
     'nproc': 4,
     'functional': '',
     'basis': '',
@@ -123,7 +125,7 @@ if __name__ == '__main__':
     reaction =  Collision(acetone, OH, qchem=qcinput_doublet) 
     reaction.Specify_Collision_Sampling(Rini=6.0, bmax=4.0, bsampling=True, Ecoll_thermal=True, temp=300.0)
 
-    reaction.sample_and_run_collision(integrator='leapfrog', integrator_order=4, timestep=0.7, maxstep=10000, iprint=4, pairs_to_stop=pairs_to_test)
+    reaction.sample_and_run_collision(integrator='sprk', integrator_order=4, timestep=0.7, maxstep=10000, iprint=4, pairs_to_stop=pairs_to_test)
 
 
    

@@ -7,85 +7,93 @@ from numpy import float64, complex128
 from qchem_interfaces.gp_pes import PES_Energy, PES_Force, PES_Hessian
 from .baeck_an_nac import calculate_nac
 
+class FSSH:
+    def __init__(self, num_states: int, active_state: int, de_cutoff: float = 0.5) -> None:
+       self.c = self._initialize_amplitudes(num_states, active_state)
+       self.de_cutoff = de_cutoff
+       self.d: Optional[NDArray] = None
 
-def propagate(
-    dtc: float,
-    active_state: int,
-    num_states: int,
-    q: NDArray[float64],
-    p: NDArray[float64],
-    mass: NDArray[float64],
-    c: NDArray[complex128],
-    de_cutoff: float = 0.5,
-    dtq: Optional[float] = None,
-):
-    """
-    Propagate the system using the fewest switches surface hopping algorithm.
+    def __call__(
+        self,
+        dtc: float,
+        active_state: int,
+        num_states: int,
+        q: NDArray[float64],
+        p: NDArray[float64],
+        mass: NDArray[float64],
+        dtq: Optional[float] = None,
+    ):
+        """
+        Propagate the system using the fewest switches surface hopping algorithm.
 
-    Parameters
-    ----------
-    dtc : float
-        Classical timestep.
-    active_state : int
-        Index of the active state.
-    num_states : int
-        Number of states.
-    q : NDArray[float64]
-        Atomic coordinates.
-    p : NDArray[float64]
-        Atomic momenta.
-    mass : NDArray[float64]
-        Atomic masses.
-    c : NDArray[complex128]
-        Quantum amplitudes.
-    de_cutoff : float, optional
-        Energy difference cutoff for the non-adiabatic coupling calculation.
-    dtq : float, optional
-        Quantum timestep. If not specified, it is set to 1/10 of the classical timestep.
+        Parameters
+        ----------
+        dtc : float
+            Classical timestep.
+        active_state : int
+            Index of the active state.
+        num_states : int
+            Number of states.
+        q : NDArray[float64]
+            Atomic coordinates.
+        p : NDArray[float64]
+            Atomic momenta.
+        mass : NDArray[float64]
+            Atomic masses.
+        c : NDArray[complex128]
+            Quantum amplitudes.
+        de_cutoff : float, optional
+            Energy difference cutoff for the non-adiabatic coupling calculation.
+        dtq : float, optional
+            Quantum timestep. If not specified, it is set to 1/10 of the classical timestep.
 
-    Returns
-    -------
-    tuple[NDArray[float64], NDArray[complex128], int]
-        New atomic momenta, quantum amplitudes, and active state.
-    """
-    dtq = dtq if dtq is not None else dtc * 1e-1
+        Returns
+        -------
+        tuple[NDArray[float64], NDArray[complex128], int]
+            New atomic momenta, quantum amplitudes, and active state.
+        """
+        dtq = dtq if dtq is not None else dtc * 1e-1
+        # Define the number of quantum steps per classical step
+        num_step = int(dtc / dtq)
 
-    # Define the number of quantum steps per classical step
-    num_step = int(dtc / dtq)
+        # Initialize the hopped state to -1, no hop has occured
+        hopped_state = -1
 
-    # Initialize the hopped state to -1, no hop has occured
-    hopped_state = -1
+        # Reshape momentum and masses
+        p, mass = p.reshape(-1, 3), mass.reshape(-1, 3)
 
-    # Reshape momentum and masses
-    p, mass = p.reshape(-1, 3), mass.reshape(-1, 3)
+        # Transform momentum into velocity to simplify equations
+        v = p / mass
 
-    # Transform momentum into velocity to simplify equations
-    v = p / mass
+        # Get the potential energy values
+        epot = PES_Energy(
+            q, list(range(num_states))
+        )  # TODO: This should be generally implemented for any qc method
 
-    # Get the potential energy values
-    epot = PES_Energy(
-        q, list(range(num_states))
-    )  # TODO: This should be generally implemented for any qc method
+        # Update coupling every classical timestep
+        self.d = _get_couplings(q, epot, num_states, self.de_cutoff)
 
-    # Update coupling every classical timestep
-    d = _get_couplings(q, epot, num_states, de_cutoff)
+        # Propagate the quantum system and check for hops
+        for _ in range(num_step):
+            self.c, hopped_state = _quantum_step(
+                v, self.c, self.d, epot, num_states, active_state, hopped_state, dtq
+            )
 
-    # Propagate the quantum system and check for hops
-    for _ in range(num_step):
-        c, hopped_state = _quantum_step(
-            v, c, d, epot, num_states, active_state, hopped_state, dtq
-        )
+        # Check if the hop is energetically allowed
+        if hopped_state != -1:
+            v, active_state = _check_frustrated_hop(
+                q, v, self.d, mass, epot, active_state, hopped_state
+            )
 
-    # Check if the hop is energetically allowed
-    if hopped_state != -1:
-        v, active_state = _check_frustrated_hop(
-            q, v, d, mass, epot, active_state, hopped_state
-        )
+        p = mass * v  # Transform velocity back to momentum
+        p = p.reshape(-1)
 
-    p = mass * v  # Transform velocity back to momentum
-    p = p.reshape(-1)
+        return p, active_state
 
-    return p, c, active_state, d
+    def _initialize_amplitudes(self, num_states: int, starting_state: int) -> NDArray[complex128]:
+        c = np.zeros(num_states, dtype=complex)
+        c[starting_state] = 1.0
+        return c
 
 
 def _get_couplings(

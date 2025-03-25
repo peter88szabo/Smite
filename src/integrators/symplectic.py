@@ -21,6 +21,7 @@ class Symplectic:
         q: NDArray,
         p: NDArray,
         atoms: list[str],
+        active_state: int
     ) -> tuple[NDArray, NDArray]:
         """
         Symplectic integrator for 4th, 6th, or 8th order integration.
@@ -31,7 +32,7 @@ class Symplectic:
         """
         for j in range(self.nsym):
             q += self.cc[j] * p / wmass * dt
-            force = force_calc(qcinput, q, atoms)
+            force = force_calc(qcinput, q, atoms, active_state)
             p += self.dd[j] * force * dt
 
         # Final update for position with the last symplectic coefficient

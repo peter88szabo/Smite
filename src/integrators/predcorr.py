@@ -24,13 +24,14 @@ class PredCorr:
         q: NDArray,
         p: NDArray,
         atoms: list[str],
+        active_state: int
     ) -> tuple[NDArray, NDArray]:
         self.step += 1
 
         if self.step < self.order:
-            return self.predcorr_initialize(qcinput, dt, wmass, q, p, atoms)
+            return self.predcorr_initialize(qcinput, dt, wmass, q, p, atoms, active_state)
         elif self.step >= self.order:
-            return self.call_predcorr(qcinput, dt, wmass, q, p, atoms)
+            return self.call_predcorr(qcinput, dt, wmass, q, p, atoms, active_state)
 
     def get_adbash_admoul_coeffs(self) -> None:
         """
@@ -71,6 +72,7 @@ class PredCorr:
         q: NDArray,
         p: NDArray,
         atoms: list[str],
+        active_state: int
     ) -> tuple[NDArray, NDArray]:
         """
         Initializer for arbitrary order Adams-Bashford---Adams-Moulton
@@ -81,7 +83,7 @@ class PredCorr:
                 "the initializer step number must be smaller or equal than the order of the Predictor Corrector"
             )
 
-        q, p = velverlet(qcinput, dt, wmass, q, p, atoms)
+        q, p = velverlet(qcinput, dt, wmass, q, p, atoms, active_state)
 
         self.save_veloc[self.step, :] = p / wmass
         self.save_force[self.step, :] = force_calc(qcinput, q, atoms)
@@ -96,6 +98,7 @@ class PredCorr:
         q: NDArray,
         p: NDArray,
         atoms: list[str],
+        active_state: int
     ) -> tuple[NDArray, NDArray]:
         """
         Arbitrary order Adams-Bashford--Adams-Moulton
@@ -116,7 +119,7 @@ class PredCorr:
         q_pred = q_old + sum_q * dt
         p_pred = p_old + sum_p * dt
 
-        force_pred = force_calc(qcinput, q_pred, atoms)
+        force_pred = force_calc(qcinput, q_pred, atoms, active_state)
 
         # ----------------------------------------------------------
         # Adams-Moulton corrector step
@@ -138,7 +141,7 @@ class PredCorr:
         # Save the new velocity and force variables
         # ----------------------------------------------------------
         force_new = force_calc(
-            qcinput, q_new, atoms
+            qcinput, q_new, atoms, active_state
         )  # Recalculate force with corrected q
 
         # Shift indices of previous elements and discard the last element

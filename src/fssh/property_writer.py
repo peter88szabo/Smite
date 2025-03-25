@@ -12,11 +12,11 @@ class PropertyWriter:
 
     def write(
         self,
-        epot: float,
-        c: NDArray,
         step: int,
         dt_class: float,
+        epot: float,
         active_state: int,
+        c: NDArray,
         coupling: NDArray,
     ):
         rho = self._calculate_density_matrix(c)
