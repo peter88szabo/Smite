@@ -86,7 +86,7 @@ class PredCorr:
         q, p = velverlet(qcinput, dt, wmass, q, p, atoms, active_state)
 
         self.save_veloc[self.step, :] = p / wmass
-        self.save_force[self.step, :] = force_calc(qcinput, q, atoms)
+        self.save_force[self.step, :] = force_calc(qcinput, q, atoms, active_state)
 
         return q, p
 
