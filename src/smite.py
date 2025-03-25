@@ -52,8 +52,23 @@ from thermostats.berendsen        import thermo_berendsen
 from thermostats.andersen         import thermo_andersen 
 #from thermostats.nosehoover       import NoseHoover
 
-from fssh.fssh                    import propagate as fssh_propagate, FSSH
+from fssh.fssh import FSSH
 
+INTEGRATORS: dict[str, Optional[callable(object)]] = {
+    "leapfrog": leapfrog,
+    "verlet": velverlet,
+    "rk4": rk4,
+    "stormer": stormer_verlet,
+    "symplectic": None,
+    "sprk": None,
+    "predcorr": None,
+    "rattle": None,
+}
+
+THERMOSTATS: tuple[str, ...] = (
+    "berendsen",
+    "andersen"
+)
 
 class Molecule:
     def __init__(self, atoms=None, mass=None, q_ini=None, p_ini=None, nfix=0, restart=False, xyz_file_path=None, constrained_bonds=None, num_states: int = 1, active_state: int = 0):
@@ -202,43 +217,41 @@ class Molecule:
 
     def instantiate_propagator(self, integrator: str, integrator_order: int, tolerance) -> Optional[object]:
         propagators = {
-            "predcorr": PredCorr(integrator_order, len(self.q)),
-            "symplectic": Symplectic(integrator_order),
-            "sprk": SPRK(integrator_order),
-            "rattle": Rattle(self.q, self.constrained_bonds, tolerance)
+            "predcorr": lambda: PredCorr(integrator_order, len(self.q)),
+            "symplectic": lambda: Symplectic(integrator_order),
+            "sprk": lambda: SPRK(integrator_order),
+            "rattle": lambda: Rattle(self.q, self.constrained_bonds, tolerance)
         }
         if integrator in propagators:
-            return propagators[integrator]
+            return propagators[integrator]()
         else:
             return None
 
     def instantiate_quantum_propagator(self, q_integrator: str, de_cutoff: Optional[float] = None) -> Optional[object]:
         q_propagators = {
-            "fssh": FSSH(self.num_states, self.active_state, de_cutoff)
+            "fssh": lambda: FSSH(self.num_states, self.active_state, de_cutoff)
         }
         if q_integrator in q_propagators:
             if self.num_states < 2:
                 raise ValueError("Number of states must be greater than 1 for quantum propagation")
-            return q_propagators[q_integrator]
+            return q_propagators[q_integrator]()
         else:
             return None
 
     def step(self, integrator: str, dt: float, propag: Optional[object] = None) -> None:
-        integrators = {
-        "leapfrog": leapfrog,
-        "verlet": velverlet,
-        "rk4": rk4,
-        "stormer": stormer_verlet,
-        "symplectic": propag,
-        "sprk": propag,
-        "predcorr": propag,
-        "rattle": propag
-        }
-
-        if integrator not in integrators:
+        if propag is not None and INTEGRATORS["symplectic"] is None:
+            INTEGRATORS.update({
+                "symplectic": propag,
+                "sprk": propag,
+                "predcorr": propag,
+                "rattle": propag
+            })
+        if integrator not in INTEGRATORS:
             raise ValueError("Non existing integrator. You can choose from: leapfrog, verlet, rk4, stormer, symplectic, sprk, and predcorr")
         else:
-            self.q, self.p = integrators[integrator](
+            if self.constrained_bonds is None and integrator != "rattle":
+                print("You have specified constrained bonds but did not select the Rattle integrator. Bonds will not be constrained.")
+            self.q, self.p = INTEGRATORS[integrator](
                 self.qchem, dt, self.wmass, self.q, self.p, self.atoms, self.active_state
             )
 
@@ -249,16 +262,14 @@ class Molecule:
         thermo_param: Optional[float],
         thermo_temp: Optional[float],
     ) -> None:
-        thermostats = ["berendsen", "andersen"]
-
         if thermostat is not None:
             if thermo_param or thermo_temp is None:
                 raise ValueError(
-                    "Since thermostate is switched on the parameter and temperature must be given"
+                    "Since thermostat is switched on the parameter and temperature must be given"
                 )
-            elif thermostat not in thermostats:
+            elif thermostat not in THERMOSTATS:
                 raise ValueError(
-                    "Non existing thermostat. You can choose from: berendsen, and andersen"
+                    "Non-existing thermostat. You can choose from: berendsen, and andersen"
                 )
             else:
                 if thermostat == "berendsen":
@@ -531,7 +542,7 @@ class Molecule:
 
 
 class Fragment(Molecule):
-    def __init__(self, atoms, mass, q_ini, p_ini, constrained_bonds: Optional[list[list[int]]] = None, num_states: int = 1, active_state: int = 0):
+    def __init__(self, atoms, mass, q_ini, p_ini, constrained_bonds: Optional[list[list[int]]] = None, num_states: Optional[int] = 1, active_state: Optional[int] = 0):
 
         super().__init__(atoms=atoms, mass=mass, q_ini=q_ini, p_ini=p_ini, constrained_bonds=constrained_bonds, num_states=num_states, active_state=active_state)
         self.hessian      = None
@@ -552,7 +563,7 @@ class Fragment(Molecule):
         
 
     @classmethod
-    def Atom_Init(cls, fname, atoms):
+    def Atom_Init(cls, fname, atoms, num_states: int = 1, active_state: int = 0):
         if len(atoms) != 1:
             raise ValueError("ERROR: Atom_Init requires only a single atom. You must provide an array with a single element, for instance: ['Cl']")
 
@@ -561,7 +572,7 @@ class Fragment(Molecule):
 
         mass = get_mass_vector(atoms)
 
-        this = cls(atoms=atoms, mass=mass, q_ini=q_ini, p_ini=p_ini)
+        this = cls(atoms=atoms, mass=mass, q_ini=q_ini, p_ini=p_ini, num_states=num_states, active_state=active_state)
 
         this.fname = fname
 
@@ -583,6 +594,7 @@ class Fragment(Molecule):
 
         if rigid:
             nfix = 1
+            constrained_bonds = [[0,1]]
 
         c9=1.0e8/0.5291772e0
         c10=137.035999074
@@ -599,7 +611,7 @@ class Fragment(Molecule):
 
         q_ini, p_ini  = cenmass(q_ini, p_ini, mass)
 
-        this = cls(atoms=atoms, mass=mass, q_ini=q_ini, p_ini=p_ini)
+        this = cls(atoms=atoms, mass=mass, q_ini=q_ini, p_ini=p_ini, constrained_bonds=constrained_bonds, num_states=num_states, active_state=active_state)
 
         this.fname      = fname
         this.req_diat = req
@@ -882,26 +894,34 @@ class Fragment(Molecule):
 
 
 class Collision(Molecule):
-    def __init__(self, fragment_A, fragment_B, qchem, num_states: Optional[int] = None, active_state: Optional[int] = None):
+    def __init__(self, fragment_A, fragment_B, qchem, constrained_bonds: list[list[int]] = None, num_states: Optional[int] = None, active_state: Optional[int] = None):
         atoms = fragment_A.atoms + fragment_B.atoms
         mass = np.append(fragment_A.mass, fragment_B.mass)
         q_ini = np.append(fragment_A.q_ini, fragment_B.q_ini)
         p_ini = np.append(fragment_A.p_ini, fragment_B.p_ini)
 
-        fragment_B.constrained_bonds = [[i + len(fragment_A.atoms), j + len(fragment_A.atoms)] for i, j in fragment_B.constrained_bonds]
-        constrained_bonds = fragment_A.constrained_bonds + fragment_B.constrained_bonds
+        if constrained_bonds is None:
+            if fragment_B.constrained_bonds is not None:
+                fragment_B.constrained_bonds = [[i + len(fragment_A.atoms), j + len(fragment_A.atoms)] for i, j in fragment_B.constrained_bonds]
+                if fragment_A.constrained_bonds is None:
+                    constrained_bonds = fragment_B.constrained_bonds
+                else:
+                    constrained_bonds = fragment_A.constrained_bonds + fragment_B.constrained_bonds
+            elif fragment_A.constrained_bonds is not None:
+                constrained_bonds = fragment_A.constrained_bonds
 
         if num_states is None:
             if fragment_A.num_states != fragment_B.num_states:
                 raise ValueError("Number of states of both fragments must be the same.")
             else:
-                num_states = fragment_A.active_state
+                num_states = fragment_A.num_states
 
         if active_state is None:
             if fragment_A.active_state != fragment_B.active_state:
                 raise ValueError("Active states of both fragments must be the same.")
             else:
                 active_state = fragment_A.active_state
+
 
         super().__init__(atoms=atoms, mass=mass, q_ini=q_ini, p_ini=p_ini, constrained_bonds=constrained_bonds, num_states=num_states, active_state=active_state)
         self.qchem = qchem
