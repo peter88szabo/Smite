@@ -1,9 +1,12 @@
+from typing import Optional
+
 import numpy as np
 import os
 import math
 import shutil
 import random
 
+from fssh.property_writer         import PropertyWriter
 from utils.cenmass                import cenmass
 from utils.euler                  import euler_rot          
 from utils.format_and_print       import parse_MDtraj_as_sampling 
@@ -42,14 +45,18 @@ from integrators.symplectic       import Symplectic
 from integrators.sprk             import SPRK
 from integrators.predcorr         import PredCorr 
 from integrators.gradient         import Energy
+from integrators.rattle import Rattle
 
 from thermostats.randmomentum     import random_initialize_momenta
 from thermostats.berendsen        import thermo_berendsen 
 from thermostats.andersen         import thermo_andersen 
 #from thermostats.nosehoover       import NoseHoover
 
+from fssh.initialize_amplitudes   import initialize_amplitudes
+from fssh.fssh                    import propagate as fssh_propagate
+
 class Molecule:
-    def __init__(self, atoms=None, mass=None, q_ini=None, p_ini=None, nfix=0, restart=False, xyz_file_path=None):
+    def __init__(self, atoms=None, mass=None, q_ini=None, p_ini=None, nfix=0, restart=False, xyz_file_path=None, constrained_bonds=None):
         if restart:
             if not xyz_file_path:
                 raise ValueError("Backup file must be provided when restart is True.")
@@ -83,6 +90,12 @@ class Molecule:
         self.vini       = None #the initial (sampled) pot energy which is likely out of equilibrium
         self.tini       = None
         self.vsave      = []
+        self.num_states = 1
+        self.active_state = None
+        self.c          = None # quantum amplitudes
+        self.d          = None # Non-adiabatic coupling
+        self.dtq        = None # Quantum time step
+        self.constrained_bonds = constrained_bonds
 
 
     def save_velocity_and_distance_matrix(self):
@@ -176,7 +189,7 @@ class Molecule:
 
     ##wave function file should be generated automatically based on the name of molecule
     #as it given in the qcinput dictionary
-    def get_energy(self, file_wf=None):
+    def get_energy(self, file_wf=None) -> tuple[float,float,float]:
         check = False
         if file_wf is None and self.qchem['wfu']:
             file_wf = 'garbage_wavefunc_file.txt'
@@ -184,11 +197,11 @@ class Molecule:
 
         #Everything else here (other than this single line)
         #is to prevent unnecessary wave function printing when wfu is switched on
-        T, V, E = Energy(self.qchem, file_wf, self.q, self.p, self.atoms, self.wmass)
+        T, V, E = Energy(self.qchem, file_wf, self.q, self.p, self.atoms, self.wmass, self.active_state)
 
         if check and os.path.exists(file_wf) and self.qchem['wfu']:
             os.remove(file_wf)
-            
+
         return T, V, E 
 
     def stormer_single_step(self, dt):
@@ -212,11 +225,27 @@ class Molecule:
     def predcorr_single_step(self, dt, this_class):
         self.q, self.p = this_class.predcorr(self.qchem, dt, self.wmass, self.q, self.p, self.atoms)
 
+    def rattle_single_step(self, dt, this_class, tol):
+        self.q, self.p = this_class.rattle(self.qchem, dt, self.wmass, self.q, self.p, self.atoms, self.active_state, tol)
+
     def thermo_berendsen(self, tau, dt, Ttarg):
         self.p = thermo_berendsen(self.nfix, self.p, self.wmass, dt, tau, Ttarg)
 
     def thermo_andersen(self, prob, dt, Ttarg):
         self.p = thermo_andersen(self.nfix, self.p, self.wmass, dt, prob, Ttarg)
+
+    def fssh(self, dt, **kwargs):
+        if 'dtq' in kwargs:
+            dtq = kwargs['dtq']
+        else:
+            dtq = None
+        if 'de_cutoff' in kwargs:
+            de_cutoff = kwargs['de_cutoff']
+        else:
+            de_cutoff = 0.5
+        if self.c is None:
+            self.c = initialize_amplitudes(self.num_states, self.active_state)
+        self.p, self.c, self.active_state, self.d = fssh_propagate(dt, self.active_state, self.num_states, self.q, self.p, self.wmass, self.c, de_cutoff=de_cutoff, dtq=dtq)
 
 
     def run_trajectory(self, integrator='verlet',
@@ -234,7 +263,11 @@ class Molecule:
                              thermostat=None,
                              thermo_param=None,
                              thermo_temp=None,
-                             spectrum=False):
+                             spectrum=False,
+                             constrained_bonds=None,
+                             tol=1e-8,
+                             **kwargs
+                       ):
 
         wf_dir = "wavefunction_along_trajectory"
 
@@ -295,6 +328,10 @@ class Molecule:
             propag = Symplectic(integrator_order)
         if integrator == 'sprk':
             propag = SPRK(integrator_order)
+        if integrator == 'rattle':
+            propag = Rattle(self.q, constrained_bonds)
+
+        property_writer = PropertyWriter()
 
         with open(traj_file, "a") as file_trj:
             for istep in range(startstep, maxstep):
@@ -304,7 +341,7 @@ class Molecule:
 
                     if self.qchem['wfu']:
                         file_wf = os.path.join(wf_dir, 'wavefunc_' + self.fname + '_step_' + str(istep) + '.molden')
-                        T, V, E = self.get_energy(file_wf=file_wf) 
+                        T, V, E = self.get_energy(file_wf=file_wf)
                     else:
                         T, V, E = self.get_energy() 
 
@@ -371,8 +408,22 @@ class Molecule:
                     self.symplectic_single_step(dt, propag)
                 elif integrator == 'sprk':
                     self.sprk_single_step(dt, propag)
+                elif integrator == 'rattle':
+                    self.rattle_single_step(dt, propag, tol)
+
                 else:
                     raise ValueError("Non existing integrator. You can choose from: leapfrog, verlet, rk4, symplectic(4,6,8) and predcorr(order)")
+
+                if self.num_states > 1:
+                    self.fssh(dt, **kwargs)
+                    property_writer.write(
+                        self.get_energy()[1],
+                        self.c,
+                        istep,
+                        dt,
+                        self.active_state,
+                        self.d
+                    )
 
                 if thermostat is not None and (thermo_param or thermo_temp) is None:
                     raise ValueError("Since thermostate switched on the parameter and temperature must be given")
@@ -466,6 +517,7 @@ class Molecule:
         c7 = 2625.5  #[Hartree]*c7=[kJ/mol] 
         c5 = 219474.0  #[Hartree]*c5=[cm-1]
         c6 = 41.341105 #[femto-sec]*c6=[time in au]
+
         trajfile.write(str(self.natom) + "\n")
         trajfile.write("%6s %10d %8s %10.2f %12s %16.8f %12s %12.8f %10s %15.4f %8s %7.1f\n" %
                        ("step= ",istep, " t[fs]= ", dt*istep/c6, " Vpot[Eh]= ", V, " Tkin[Eh]= ", T, " dE[kJ]= ",dE*c7, " T[K]= ", Temp ))
@@ -619,7 +671,7 @@ class Fragment(Molecule):
        #--------------------------------------------------------------------
         if not rigid and not fromMD:
             hessFile = 'hessian_' + fname + '.hess'
-            hessian = getHessian(qcinput=qchem, hessFile=hessFile, xyz=xyz)
+            hessian = getHessian(qcinput=qchem, hessFile=hessFile, xyz=xyz, active_state=this.active_state)
 
             if print_nmode:
                 freq, freq_low, Lmat = print_normalmode(fname=fname, atoms=atoms, mass=mass, q_eq=q_eq, hessian=hessian,
@@ -721,7 +773,7 @@ class Fragment(Molecule):
 
     def sample_and_run_trajectory(self, integrator='verlet', integrator_order=4, timestep=1.0, startstep=0, maxstep=100, iprint=1,
                                   traj_file=None, backfile=None, Rstop=None, pairs_to_stop=None,
-                                  thermostat=None, thermo_param=None, thermo_temp=None, spectrum=False):
+                                  thermostat=None, thermo_param=None, thermo_temp=None, spectrum=False, constrained_bonds=None, tol=1e-8, **kwargs):
 
         if traj_file is None:
             traj_file = 'traj_' + self.fname + '.xyz' 
@@ -747,7 +799,7 @@ class Fragment(Molecule):
 
         self.run_trajectory(integrator=integrator, integrator_order=integrator_order, timestep=timestep, startstep=startstep, maxstep=maxstep,
                             iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=False,
-                            Rstop=Rstop, pairs_to_stop=pairs_to_stop, thermostat=thermostat, thermo_param=thermo_param, thermo_temp=thermo_temp, spectrum=spectrum)
+                            Rstop=Rstop, pairs_to_stop=pairs_to_stop, thermostat=thermostat, thermo_param=thermo_param, thermo_temp=thermo_temp, spectrum=spectrum, constrained_bonds=constrained_bonds, tol=tol, **kwargs)
 
 
     def print_mode_sampling(self):
@@ -1215,7 +1267,7 @@ class Collision(Molecule):
 
         self.run_trajectory(integrator=integrator, integrator_order=integrator_order, timestep=timestep, startstep=startstep, maxstep=maxstep,
                             iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=restart,
-                            collision=True, Rstop=Rstop, pairs_to_stop=pairs_to_stop, spectrum=spectrum)
+                            collision=True, Rstop=Rstop, pairs_to_stop=pairs_to_stop, spectrum=spectrum, **kwargs)
 
 
     def multi_paralell_traj_sample_and_run_collision(self, slurm=False, cores_per_traj=1, integrator='verlet', integrator_order=4, timestep=1.0, startstep=0, maxstep=100, iprint=2,
@@ -1247,13 +1299,13 @@ class Collision(Molecule):
         print(f"Total cores to use: {total_cores}, Cores per trajectory: {cores_per_traj}")
 
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        futures = [
-            executor.submit(
-                run_single_trajectory, self, itraj, traj_file, backfile, integrator, integrator_order, timestep,
-                startstep, maxstep, iprint, restart, pairs_to_stop, Rstop, spectrum, **kwargs
-            )
-            for itraj in range(ntraj)
-        ]
+            futures = [
+                executor.submit(
+                    run_single_trajectory, self, itraj, traj_file, backfile, integrator, integrator_order, timestep,
+                    startstep, maxstep, iprint, restart, pairs_to_stop, Rstop, spectrum, **kwargs
+                )
+                for itraj in range(ntraj)
+            ]
 
         # Wait for all tasks to complete
         for future in futures:

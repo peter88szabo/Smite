@@ -4,6 +4,7 @@ from qchem_interfaces.pyscfrun     import PySCF_Hessian
 from qchem_interfaces.sparrowpy    import SparrowPy_Hessian
 from qchem_interfaces.sparrowbin   import Sparrowbin_Hessian
 from qchem_interfaces.xtbrun       import XTB_Hessian
+from qchem_interfaces.gp_pes       import PES_Hessian
 
 from utils.format_and_print import parseXYZ
 
@@ -11,13 +12,15 @@ import numpy as np
 import os
 
 
-def getHessian(qcinput, hessFile, xyz):
+def getHessian(qcinput, hessFile, xyz, active_state=0):
 
     Natoms, atoms, qcoord = parseXYZ(xyz)
 
     qcoord = qcoord / 0.52917721092 #angtstrom to bohr
 
-    qchem = qcinput['qchem'] 
+    qchem = qcinput['qchem']
+
+    print(qcoord)
 
     if os.path.exists(hessFile):
         print(f"\nLoading hessian from file\n")
@@ -26,7 +29,6 @@ def getHessian(qcinput, hessFile, xyz):
             return hess
         else: 
             print("\nSize of the Hessian matrix in the file is wrong. It must be (3*Natoms, 3*Natoms)\n")
-
 
     print(f"\nThe program could not find Hessian in the file: {hessFile}")
     print(f"Recalculating Hessian from scratch\n")
@@ -42,7 +44,7 @@ def getHessian(qcinput, hessFile, xyz):
     elif qchem == 'XTB':
         hess = XTB_Hessian(qcoord, atoms, qcinput)
     elif qchem == 'PES':
-        hess = PES_Hessian(qcoord, atoms)
+        hess = PES_Hessian(qcoord, active_state)
     else:
         raise ValueError("Non-Existing Quantum Chemistry interface in input. Avaiable packages: Orca, PySCF, Sparrow_Py, Sparrow_bin, XTB")
 
