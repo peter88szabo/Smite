@@ -296,7 +296,7 @@ class Molecule:
                 "Non existing integrator. You can choose from: leapfrog, verlet, rk4, stormer, symplectic, sprk, and predcorr"
             )
         else:
-            if self.constrained_bonds is None and integrator != "rattle":
+            if self.constrained_bonds is not None and integrator != "rattle":
                 print(
                     "You have specified constrained bonds but did not select the Rattle integrator. Bonds will not be constrained."
                 )
