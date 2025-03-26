@@ -15,6 +15,8 @@ class Rattle:
             constrained_bonds = np.array(constrained_bonds)
         if len(q_init.shape) == 1:
             q_init = q_init.reshape(-1,3)
+        if tol is None:
+            tol = 1e-8
 
         self.q_init = q_init
         self.constrained_bonds = constrained_bonds
@@ -614,8 +616,8 @@ def coords_corr(
                 q_t0=[q_t0[atom_1, :], q_t0[atom_2, :]],
                 q_dt=[q_dt[atom_1, :], q_dt[atom_2, :]],
                 constraint=constraints[bond],
-                m_a=mass[atom_1, atom_1],
-                m_b=mass[atom_2, atom_2],
+                m_a=mass[atom_1, 0],
+                m_b=mass[atom_2, 0],
                 fixed_internal=fixed_internals[bond],
                 dt=dt,
                 tol=tol,
@@ -676,8 +678,8 @@ def v_corr(
                 q_dt=[q_dt[atom_1, :], q_dt[atom_2, :]],
                 v_dt=[v_dt[atom_1, :], v_dt[atom_2, :]],
                 constraint=constraints[bond],
-                m_a=mass[atom_1, atom_1],
-                m_b=mass[atom_2, atom_2],
+                m_a=mass[atom_1, 0],
+                m_b=mass[atom_2, 0],
                 dt=dt,
                 tol=tol,
             )
