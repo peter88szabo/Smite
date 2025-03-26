@@ -15,6 +15,8 @@ class Rattle:
             constrained_bonds = np.array(constrained_bonds)
         if len(q_init.shape) == 1:
             q_init = q_init.reshape(-1,3)
+        if tol is None:
+            tol = 1e-8
 
         self.q_init = q_init
         self.constrained_bonds = constrained_bonds
