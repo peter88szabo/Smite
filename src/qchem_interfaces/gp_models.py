@@ -116,11 +116,8 @@ class GPModel:
         def mean_f(x):
             return self.models[state](x)[0]
 
-        x = torch.tensor(x, dtype=torch.float64)
+        x = torch.tensor(x, dtype=torch.float64, requires_grad=True)
         x = self.reshape(x)
-        x = torch.autograd.Variable(
-            x, requires_grad=True
-        )
 
         grad = torch.autograd.functional.jacobian(mean_f, x).squeeze()
 
@@ -141,11 +138,8 @@ class GPModel:
         def mean_f(x):
             return self.models[state](x)[0]
 
-        x = torch.tensor(x, dtype=torch.float64)
+        x = torch.tensor(x, dtype=torch.float64, requires_grad=True)
         x = self.reshape(x)
-        x = torch.autograd.Variable(
-            x, requires_grad=True
-        )
 
         hess = torch.autograd.functional.hessian(mean_f, x).squeeze()
 
