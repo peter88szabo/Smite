@@ -106,8 +106,8 @@ class Molecule:
         self.natom = len(atoms)
         self.q_ini = np.array(q_ini)
         self.p_ini = np.array(p_ini)
-        self.q = np.array(q_ini)
-        self.p = np.array(p_ini)
+        self.q = q_ini.copy()
+        self.p = p_ini.copy()
         self.mass = np.array(mass)
         self.wmass = np.repeat(mass, 3)
         self.totmass = np.sum(mass)
@@ -259,7 +259,7 @@ class Molecule:
             "predcorr": lambda: PredCorr(integrator_order, len(self.q)),
             "symplectic": lambda: Symplectic(integrator_order),
             "sprk": lambda: SPRK(integrator_order),
-            "rattle": lambda: Rattle(self.q, self.constrained_bonds, tolerance),
+            "rattle": lambda: Rattle(self.q_ini, self.constrained_bonds, tolerance),
         }
         if integrator in propagators:
             return propagators[integrator]()
@@ -1716,6 +1716,58 @@ class Collision(Molecule):
             tolerance=tolerance,
         )
 
+    def run_single_trajectory(
+        self,
+        itraj: int,
+        traj_file: str,
+        backfile: str,
+        integrator: str,
+        integrator_order: int,
+        timestep: float,
+        startstep: int,
+        maxstep: int,
+        iprint: int,
+        restart: bool,
+        pairs_to_stop: list[tuple[int], str, float],
+        Rstop: float,
+        spectrum: bool,
+        **kwargs,
+    ):
+        if INTEGRATORS['symplectic'] is not None:
+            INTEGRATORS.update(
+                {
+                    "symplectic": None,
+                    "sprk": None,
+                    "predcorr": None,
+                    "rattle": None,
+                }
+            )
+
+        os.mkdir(f"traj_{itraj}")
+
+        traj_file = f"traj_{itraj}/{traj_file}"
+        backfile = f"traj_{itraj}/{backfile}"
+
+        self.Sample_Bimolecular_Reactants()
+
+        self.run_trajectory(
+            integrator=integrator,
+            integrator_order=integrator_order,
+            timestep=timestep,
+            startstep=startstep,
+            maxstep=maxstep,
+            iprint=iprint,
+            traj_file=traj_file,
+            backfile=backfile,
+            restart=restart,
+            collision=True,
+            Rstop=Rstop,
+            pairs_to_stop=pairs_to_stop,
+            spectrum=spectrum,
+            **kwargs,
+        )
+
+
     def multi_paralell_traj_sample_and_run_collision(
         self,
         ntraj=1,
@@ -1738,18 +1790,10 @@ class Collision(Molecule):
         from concurrent.futures import ProcessPoolExecutor
 
         if traj_file is None:
-            traj_file = (
-                "traj_" + self.fragment_A.fname + "_+_" + self.fragment_B.fname + ".xyz"
-            )
+            traj_file = f"traj_{self.fragment_A.fname}_+_{self.fragment_B.fname}"
 
         if backfile is None:
-            backfile = (
-                "backup_"
-                + self.fragment_A.fname
-                + "_+_"
-                + self.fragment_B.fname
-                + ".xyz"
-            )
+            backfile = f"backup_{self.fragment_A.fname}_+_{self.fragment_B.fname}"
 
         if pairs_to_stop is None and Rstop is None:
             raise ValueError(
@@ -1820,19 +1864,12 @@ class Collision(Molecule):
         de_cutoff=None,
         tolerance=None,
     ):
+
         if traj_file is None:
-            traj_file = (
-                "traj_" + self.fragment_A.fname + "_+_" + self.fragment_B.fname + ".xyz"
-            )
+            traj_file = f"traj_{self.fragment_A.fname}_+_{self.fragment_B.fname}"
 
         if backfile is None:
-            backfile = (
-                "backup_"
-                + self.fragment_A.fname
-                + "_+_"
-                + self.fragment_B.fname
-                + ".xyz"
-            )
+            backfile = f"backup_{self.fragment_A.fname}_+_{self.fragment_B.fname}"
 
         if pairs_to_stop is None and Rstop is None:
             raise ValueError(
@@ -1840,15 +1877,19 @@ class Collision(Molecule):
             )
 
         for itraj in range(ntraj):
-            traj_file += str(itraj) + "_"
-            backfile += "traj_" + str(itraj) + "_"
+            if INTEGRATORS['symplectic'] is not None:
+                INTEGRATORS.update(
+                    {
+                        "symplectic": None,
+                        "sprk": None,
+                        "predcorr": None,
+                        "rattle": None,
+                    }
+                )
 
-            # here we should open a specific directory then run the single traj there
-            # as traj_122
-            #    traj_123
-            # Amit meg meg kell oldalni, hogy a orca_tmp-t vagy mas tmp-t is odategyuk
-            # meg a vibracios filokat is
-            # meg masoljuk a hessiant be ebbe a file-ba
+            traj_file = f"{traj_file}_{itraj}.xyz"
+            backfile = f"{backfile}_{itraj}.xyz"
+
             self.Sample_Bimolecular_Reactants()
 
             self.run_trajectory(
