@@ -1877,6 +1877,7 @@ class Collision(Molecule):
             )
 
         for itraj in range(ntraj):
+            print("Trajectory: ", itraj)
             if INTEGRATORS['symplectic'] is not None:
                 INTEGRATORS.update(
                     {
@@ -1887,8 +1888,8 @@ class Collision(Molecule):
                     }
                 )
 
-            traj_file = f"{traj_file}_{itraj}.xyz"
-            backfile = f"{backfile}_{itraj}.xyz"
+            n_traj_file = f"{traj_file}_{itraj}.xyz"
+            n_backfile = f"{backfile}_{itraj}.xyz"
 
             self.Sample_Bimolecular_Reactants()
 
@@ -1899,8 +1900,8 @@ class Collision(Molecule):
                 startstep=startstep,
                 maxstep=maxstep,
                 iprint=iprint,
-                traj_file=traj_file,
-                backfile=backfile,
+                traj_file=n_traj_file,
+                backfile=n_backfile,
                 restart=restart,
                 collision=True,
                 Rstop=Rstop,
