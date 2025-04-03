@@ -8,7 +8,7 @@ from numpy import float64, ndarray, dtype, floating
 from integrators.gradient import force_calc
 
 class Rattle:
-    def __init__(self, q_init, constrained_bonds, tol=1e-8):
+    def __init__(self, q_init: NDArray, constrained_bonds: list[list[int]] | NDArray, tol: float = 1e-8):
         if constrained_bonds is None:
             raise NotImplementedError("The constrained bonds are not specified.")
         if isinstance(constrained_bonds, list):
