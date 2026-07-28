@@ -1,6 +1,7 @@
 import numpy as np
 import os
 from collections import Counter
+from utils.constants import BOHR_TO_ANGSTROM, FS_TO_AU_TIME, HARTREE_TO_CM1
 
 def chemical_formula_from_list(veclist):
    #Count the occurrences of each atomic element
@@ -54,8 +55,6 @@ def parseXYZ(xyz):
 
 
 def parseCheckPoint(xyz_file_path):
-    b2a = 0.52917721092
-
     with open(xyz_file_path, 'r') as xyz_file:
         lin = xyz_file.readlines()
 
@@ -79,7 +78,7 @@ def parseCheckPoint(xyz_file_path):
     # Loop through the lines and extract the positions
     for line in lines:
         parts = line.split()
-        a, x, y, z, px, py, pz = parts[0], float(parts[1])/b2a, float(parts[2])/b2a, float(parts[3])/b2a, float(parts[4]), float(parts[5]), float(parts[6])
+        a, x, y, z, px, py, pz = parts[0], float(parts[1]) / BOHR_TO_ANGSTROM, float(parts[2]) / BOHR_TO_ANGSTROM, float(parts[3]) / BOHR_TO_ANGSTROM, float(parts[4]), float(parts[5]), float(parts[6])
         atoms.append(a)
         q.extend([x, y, z])
         p.extend([px, py, pz])
@@ -95,8 +94,6 @@ def parse_MDtraj_as_sampling(xyz_file_path):
     Parse the XYZ trajectory file and save all geometries (q and p coordinates) into a dictionary.
     The dictionary keys are the geometry indices, and the values are tuples (q, p).
     '''
-
-    b2a = 0.52917721092
 
     with open(xyz_file_path, 'r') as xyz_file:
         lin = xyz_file.readlines()
@@ -127,9 +124,9 @@ def parse_MDtraj_as_sampling(xyz_file_path):
         for line in atom_lines:
             parts = line.strip().split()
             x, y, z, px, py, pz = (
-                float(parts[1]) / b2a,
-                float(parts[2]) / b2a,
-                float(parts[3]) / b2a,
+                float(parts[1]) / BOHR_TO_ANGSTROM,
+                float(parts[2]) / BOHR_TO_ANGSTROM,
+                float(parts[3]) / BOHR_TO_ANGSTROM,
                 float(parts[4]),
                 float(parts[5]),
                 float(parts[6])
@@ -147,15 +144,14 @@ def parse_MDtraj_as_sampling(xyz_file_path):
 
 
 def makeXYZ(atoms, q):
-    b2a = 0.52917721092
     natoms = len(atoms)
 
     xyz = ""
 
     for i in range(natoms):
-        xyz += atoms[i] + " "*6+str(q[i*3]*b2a) \
-            + " "*6+str(q[i*3+1]*b2a) \
-            + " "*6+str(q[i*3+2]*b2a) \
+        xyz += atoms[i] + " "*6+str(q[i*3]*BOHR_TO_ANGSTROM) \
+            + " "*6+str(q[i*3+1]*BOHR_TO_ANGSTROM) \
+            + " "*6+str(q[i*3+2]*BOHR_TO_ANGSTROM) \
             + "\n"
     return xyz
 
@@ -179,33 +175,24 @@ def check_and_create_file(file_name,ending):
 
 
 def print_trajectory(trajfile, atoms, q, p, V, dE, dt, istep):
-    b2a = 0.52917721092
-    c5=219474.0  #[Hartree]*c5=[cm-1]
-    c6=41.341105 #[femto-sec]*c6=[time in au]
-
     trajfile.write(str(len(atoms)) + "\n")
-    trajfile.write("%7s %10d %4s %15.4f %15s %15.8f %10s %12.5f \n" % ("step= ",istep, "    t[fs]= ", dt*istep/c6, "     Vpot[au]= ", V, "      dE[cm-1]= ",dE*c5))
+    trajfile.write("%7s %10d %4s %15.4f %15s %15.8f %10s %12.5f \n" % ("step= ",istep, "    t[fs]= ", dt*istep/FS_TO_AU_TIME, "     Vpot[au]= ", V, "      dE[cm-1]= ",dE*HARTREE_TO_CM1))
     for i in range(0,len(atoms)): 
         jx = 3*i
         jy = 3*i+1
         jz = 3*i+2
-        trajfile.write("%3s %15.5f  %15.5f %15.5f %20.8f  %20.8f %20.8f \n" % (atoms[i],q[jx]*b2a, q[jy]*b2a, q[jz]*b2a, p[jx], p[jy], p[jz]) )
+        trajfile.write("%3s %15.5f  %15.5f %15.5f %20.8f  %20.8f %20.8f \n" % (atoms[i],q[jx]*BOHR_TO_ANGSTROM, q[jy]*BOHR_TO_ANGSTROM, q[jz]*BOHR_TO_ANGSTROM, p[jx], p[jy], p[jz]) )
 
 
 
 
 def print_end(trajfile, atoms, q, p, dt, istep, channel, formula):
-    b2a = 0.52917721092
-    c5=219474.0  #[Hartree]*c5=[cm-1]
-    c6=41.341105 #[femto-sec]*c6=[time in au]
-
     trajfile.write(str(len(atoms)) + "\n")
-    trajfile.write("%7s %10d %4s %15.4f %10s %6d %13s %30s \n" % ("step= ",istep, "    t[fs]= ", dt*istep/c6, " channel: ",channel, "  products: ", formula))
+    trajfile.write("%7s %10d %4s %15.4f %10s %6d %13s %30s \n" % ("step= ",istep, "    t[fs]= ", dt*istep/FS_TO_AU_TIME, " channel: ",channel, "  products: ", formula))
     for i in range(0,len(atoms)):
         jx = 3*i
         jy = 3*i+1
         jz = 3*i+2
-        trajfile.write("%3s %15.5f  %15.5f %15.5f %20.8f  %20.8f %20.8f \n" % (atoms[i],q[jx]*b2a, q[jy]*b2a, q[jz]*b2a, p[jx], p[jy], p[jz]) )
-
+        trajfile.write("%3s %15.5f  %15.5f %15.5f %20.8f  %20.8f %20.8f \n" % (atoms[i],q[jx]*BOHR_TO_ANGSTROM, q[jy]*BOHR_TO_ANGSTROM, q[jz]*BOHR_TO_ANGSTROM, p[jx], p[jy], p[jz]) )
 
 

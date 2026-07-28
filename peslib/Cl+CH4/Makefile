@@ -6,10 +6,16 @@
 ################################################################################
 
 F2PY=f2py
+FC=gfortran
+FFLAGS=-O2 -fPIC
+SHARED_TARGET=libclch4_pes.so
 
-.PHONY: all build pyf clean
+.PHONY: all shared build pyf clean
 
-all: build
+all: shared
+
+shared:
+	$(FC) -shared $(FFLAGS) -o $(SHARED_TARGET) clch4_c_interface.f90 ch4cl2005.f ../F+H2/utility.f
 
 build:
 	$(F2PY) -c ch4cl2005.f utility.f ch4cl2005_new.pyf 
@@ -18,4 +24,4 @@ pyf:
 	$(F2PY) -m PES -h ch4cl2005_new.pyf ch4cl2005.f --overwrite-signature
 
 clean:
-	rm -f *.o PES.so
+	rm -f *.o *.mod PES*.so $(SHARED_TARGET)

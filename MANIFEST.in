@@ -1,0 +1,25 @@
+include LICENSE
+include README.md
+include pyproject.toml
+include src/test*.py
+recursive-include peslib *.py *.f *.f90 *.pyf *.dat *.txt Makefile *.sh
+
+recursive-exclude papers *
+recursive-exclude build *
+recursive-exclude dist *
+recursive-exclude src/test/scratch *
+recursive-exclude src/scratch *
+recursive-exclude src/output *
+recursive-exclude src/outputs *
+recursive-exclude src *.py[cod] __pycache__
+
+global-exclude *.egg-info
+global-exclude *.log
+global-exclude *.out
+global-exclude *.tmp
+global-exclude *.so
+global-exclude *.mod
+global-exclude gradient
+global-exclude molden.input
+global-exclude xtbrestart
+global-exclude xtbtopo.mol

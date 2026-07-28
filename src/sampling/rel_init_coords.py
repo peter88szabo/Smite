@@ -3,7 +3,7 @@ import math
 import random
 from utils.cenmass import cenmass
 
-def setRelativeInitCoords(Ecoll=0.1, Ecoll_thermal=False, bmax=8.0, bsampling=False, temp=300.0, Rini=18.0, massA, massB, qA, qB, pA, pB):
+def setRelativeInitCoords(massA, massB, qA, qB, pA, pB, Ecoll=0.1, Ecoll_thermal=False, bmax=8.0, bsampling=False, temp=300.0, Rini=18.0):
     if bsampling:
         bimp = bmax * math.sqrt(random.uniform(0.0,1.0))
     else:

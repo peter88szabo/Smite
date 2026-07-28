@@ -93,6 +93,11 @@ def cluster_chemical_formulas(q, atoms, eps, minPts):
         formula = create_chemical_formula(cluster_atoms)
         cluster_formulas.append(formula)
 
+    # DBSCAN labels isolated atoms as noise. They are nevertheless legitimate
+    # monatomic products and must not disappear from the reported channel.
+    for index in np.where(labels < 0)[0]:
+        cluster_formulas.append(create_chemical_formula([atoms[index]]))
+
     # Concatenate all cluster formulas into a single string
     result_formula = ' + '.join(cluster_formulas)
 
@@ -121,7 +126,6 @@ def q_to_xyz_matrix(vector):
 if __name__ == '__main__':
    from format_and_print import parseXYZ
    from format_and_print import qvec_to_xyz_matrix
-   b2a = 0.52917721092
 
    xyz1 = '''
 	C        -1.75201          1.17793        -2.37478 
@@ -218,5 +222,3 @@ O         7.23978         -1.84586         3.82761
 
 
    
-
-

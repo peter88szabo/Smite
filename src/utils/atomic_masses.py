@@ -1,3 +1,5 @@
+from utils.constants import ATOMIC_MASS_GMOL_TO_AU
+
 # Dictionary of atomic masses for elements up to Oganesson (Og)
 atomic_masses = {
     'H': 1.008,    'D': 2.0141,   'T': 3.0160,   'He': 4.0026,  'Li': 6.94,    'Be': 9.0122,  'B': 10.81,    'C': 12.011,
@@ -19,7 +21,7 @@ atomic_masses = {
 
 def get_mass_vector(atoms, **kwargs):
 
-    gmol2au = kwargs.get('gmol2au', 1838.6836605)
+    gmol2au = kwargs.get('gmol2au', ATOMIC_MASS_GMOL_TO_AU)
     #gmol2au = kwargs.get('gmol2au', 1838.152673426)
 
     mass_vector = []
@@ -35,5 +37,4 @@ if __name__ == "__main__":
     mass_vector = get_mass_vector(atoms)
     print("Default assigment of masses:")
     for i in range(len(atoms)):
-        print(atoms[i],mass_vector[i], mass_vector[i]/1838.6836605)
-
+        print(atoms[i],mass_vector[i], mass_vector[i]/ATOMIC_MASS_GMOL_TO_AU)

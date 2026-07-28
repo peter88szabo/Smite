@@ -1,5 +1,6 @@
 import numpy as np
 from collections import deque, Counter
+from utils.constants import ANGSTROM_TO_BOHR
 
 def create_adjacency_list(atoms, q, bond_th_HX, bond_th_XX):
     coords = q.reshape(-1, 3)
@@ -10,17 +11,16 @@ def create_adjacency_list(atoms, q, bond_th_HX, bond_th_XX):
             #----------------------------------------------------------------
             #Yehh, ugly nested loops...later will be made more aesthetic
 
-            #We do not care about H-H atom pairs only H-X or X-Y pairs
-            if atoms[i] != 'H' or atoms[j] != 'H':
+            hydrogen_isotopes = {'H', 'D', 'T'}
+            if atoms[i] not in hydrogen_isotopes and atoms[j] not in hydrogen_isotopes:
+                bond_threshold = bond_th_XX
+            else:
+                # H-H (and isotope) bonds are real product bonds too.
+                bond_threshold = bond_th_HX
 
-                if atoms[i] != 'H' and atoms[j] != 'H':
-                    bond_threshold = bond_th_XX 
-                else:
-                    bond_threshold = bond_th_HX 
-
-                if np.linalg.norm(coords[i] - coords[j]) <= bond_threshold:
-                    adj_list[i].append(j)
-                    adj_list[j].append(i)
+            if np.linalg.norm(coords[i] - coords[j]) <= bond_threshold:
+                adj_list[i].append(j)
+                adj_list[j].append(i)
             #----------------------------------------------------------------
 
     return adj_list
@@ -109,7 +109,7 @@ if __name__ == "__main__":
 
     
     atoms, q = parseXYZ(xyz0)
-    q = q / 0.5291772
+    q = q * ANGSTROM_TO_BOHR
     formula = create_chemical_formula(atoms)
     print("original Molecule: ", formula)
     print()
@@ -117,8 +117,8 @@ if __name__ == "__main__":
     # Define the axis using atoms with indices 1 and 2 (0-based index)
     atom1_idx = 3
     atom2_idx = 4
-    bond_th_HX = 1.5/0.5291772
-    bond_th_XX = 2.0/0.5291772
+    bond_th_HX = 1.5 * ANGSTROM_TO_BOHR
+    bond_th_XX = 2.0 * ANGSTROM_TO_BOHR
 
     side1_indices, side2_indices = find_fragments_bfs(atoms, q, atom1_idx, atom2_idx, bond_th_HX, bond_th_XX)
 
@@ -133,5 +133,4 @@ if __name__ == "__main__":
     print()
     print(f"Atoms on side atom {atom2_idx} of the axis: {side2_indices}")
     print("Chemical formula for side 2:", side2_formula)
-
 

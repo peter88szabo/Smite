@@ -1,0 +1,356 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!50!black,
+  urlcolor=blue!50!black,
+  citecolor=blue!50!black
+}
+
+\setlist[itemize]{leftmargin=*, itemsep=2pt, topsep=3pt}
+\setlist[enumerate]{leftmargin=*, itemsep=2pt, topsep=3pt}
+
+\title{Supporting Information: Quasiclassical Trajectory and Quantum-Chemistry Interface Features in Smite}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Overview}
+
+Smite is a Python toolkit for direct quasiclassical trajectory (QCT) and molecular dynamics calculations on either analytic/model potential energy surfaces (PESs), machine-learning-style PES wrappers, or on-the-fly electronic-structure gradients.  The public simulation objects are \texttt{Fragment}, \texttt{Collision}, and \texttt{Molecule}.  A \texttt{Fragment} stores atom labels, masses, Cartesian coordinates, momenta, normal-mode data, and sampling settings.  A \texttt{Collision} combines two fragments and adds bimolecular sampling variables such as initial center-of-mass separation, impact parameter, relative collision energy, and stopping conditions.  A \texttt{Molecule} provides the common trajectory propagator used for unimolecular and bimolecular dynamics.
+
+All internal propagation uses atomic units.  User-facing molecular geometries are supplied in Angstrom and converted to bohr.  Printed trajectories use Angstrom for coordinates and atomic units for momenta.  Energies are stored in hartree internally and are reported with common conversions to kJ mol$^{-1}$, kcal mol$^{-1}$, and cm$^{-1}$ where appropriate.
+
+\section{Supported QCT Workflows}
+
+\subsection{Molecular systems}
+
+The QCT layer supports:
+\begin{itemize}
+  \item atom, diatom, and polyatom fragments;
+  \item nonrigid normal-mode sampling for polyatomic molecules;
+  \item harmonic and Morse oscillator sampling for diatomics;
+  \item rigid fragments and surface fragments;
+  \item unimolecular trajectories from semiclassical initial conditions;
+  \item bimolecular gas-phase collision trajectories;
+  \item molecule-surface collision geometries with incidence-angle sampling;
+  \item restart-style trajectory backup files;
+  \item optional post-trajectory spectral, scattering, and vector-correlation analysis;
+  \item independent parallel trajectory execution with per-trajectory output and scratch directories.
+\end{itemize}
+
+\subsection{Trajectory propagation}
+
+The central propagation routine evaluates the potential energy and Cartesian forces at the current geometry, advances coordinates and momenta, optionally applies a thermostat, writes trajectory frames, and checks termination criteria.  Available propagators are:
+\begin{itemize}
+  \item velocity Verlet;
+  \item leapfrog;
+  \item Stormer--Verlet;
+  \item fourth-order Runge--Kutta;
+  \item fourth-, sixth-, and eighth-order symplectic factorizations;
+  \item symplectic partitioned Runge--Kutta;
+  \item predictor--corrector integration.
+\end{itemize}
+
+Constant-energy NVE trajectories are obtained when no thermostat is selected.  NVT-style segments are available through Berendsen, Andersen, Nose--Hoover, and generalized Langevin equation (GLE) thermostats.  The trajectory temperature is computed from
+\begin{equation}
+  T = \frac{2K}{N_{\mathrm{dof}} R},
+\end{equation}
+where $K=\sum_i p_i^2/(2m_i)$, $N_{\mathrm{dof}}$ is the number of active Cartesian degrees of freedom after subtracting any fixed degrees of freedom, and $R$ is the gas constant in hartree K$^{-1}$.
+
+\section{Semiclassical Quantization of Initial Conditions}
+
+\subsection{Polyatomic vibrational sampling}
+
+For nonrigid polyatomic fragments, Smite obtains a Hessian, projects out translations and rotations through the normal-mode machinery, and samples vibrational normal modes.  The normal-mode matrix maps mass-weighted mode displacements into Cartesian coordinates,
+\begin{equation}
+  \mathbf{q} = \mathbf{q}_{\mathrm{eq}} + \mathbf{L}\mathbf{Q}.
+\end{equation}
+The inverse diagnostic projection is
+\begin{equation}
+  Q_k = \mathbf{L}_k^T \mathbf{M}(\mathbf{q}-\mathbf{q}_{\mathrm{eq}}),
+  \qquad
+  \dot{Q}_k = \mathbf{L}_k^T \mathbf{p},
+\end{equation}
+and the recovered harmonic mode energy is
+\begin{equation}
+  E_k = \frac{1}{2}\dot{Q}_k^2 + \frac{1}{2}\omega_k^2 Q_k^2.
+\end{equation}
+
+Each normal mode can be sampled independently using one of four modes:
+\begin{itemize}
+  \item \texttt{Q}: fixed vibrational quantum number $n_k$, with
+  \begin{equation}
+    E_k = \omega_k \left(n_k + \frac{1}{2}\right);
+  \end{equation}
+  \item \texttt{E}: fixed mode energy, allowing a noninteger effective quantum number
+  \begin{equation}
+    n_k^{\mathrm{eff}} = \frac{E_k}{\omega_k} - \frac{1}{2};
+  \end{equation}
+  \item \texttt{T}: thermal vibrational sampling, where a quantum number is sampled from a Boltzmann-like distribution by
+  \begin{equation}
+    n_k = \left\lfloor \frac{-RT\ln(1-\xi)}{\omega_k} \right\rfloor;
+  \end{equation}
+  \item \texttt{W}: ground-state Wigner sampling of the harmonic oscillator.
+\end{itemize}
+Here $\xi$ is a uniform random number in $(0,1)$, and $RT$ is expressed in hartree.  For low-frequency thermal sampling a frequency cutoff of 100 cm$^{-1}$ is used for the sampling distribution while retaining the actual frequency in the final energy.
+
+For the fixed-energy QCT modes, a uniformly random phase $\phi_k\in[0,2\pi)$ is selected and the normal-coordinate amplitude is
+\begin{equation}
+  A_k = \frac{\sqrt{2E_k}}{\omega_k}.
+\end{equation}
+The sampled mode displacement and velocity are then
+\begin{equation}
+  Q_k = A_k\cos\phi_k,
+  \qquad
+  \dot{Q}_k = -A_k\omega_k\sin\phi_k.
+\end{equation}
+The normal-mode displacements and velocities are transformed back to Cartesian coordinates and momenta.  Center-of-mass translation is removed after sampling.
+
+For ground-state Wigner sampling, the code samples the harmonic oscillator Wigner distribution in the convention
+\begin{equation}
+  W_0(Q,P)=\pi^{-1}\exp\left(-\omega Q^2-\frac{P^2}{\omega}\right),
+\end{equation}
+so that $\mathrm{var}(Q)=1/(2\omega)$ and $\mathrm{var}(P)=\omega/2$.  The sampled energy is converted to an effective quantum number for diagnostics.
+
+Mode sampling is configured globally with \texttt{init\_vib\_type = ZPE}, \texttt{Temp}, or \texttt{Wigner}, and individual modes can be overwritten using lists such as \texttt{fix\_quantum}, \texttt{fix\_energy}, \texttt{fix\_temp}, and \texttt{fix\_wigner}.
+
+\subsection{Diatomic vibrational sampling}
+
+Diatomic fragments can be sampled as harmonic oscillators or as Morse oscillators.  For the harmonic model, the same \texttt{Q}, \texttt{E}, \texttt{T}, and \texttt{W} options are available.  Given reduced mass $\mu$, equilibrium bond length $r_e$, and frequency $\omega$, a fixed quantum number gives
+\begin{equation}
+  E_v = \omega\left(n+\frac{1}{2}\right).
+\end{equation}
+A random phase is used to sample the bond displacement and conjugate momentum,
+\begin{equation}
+  \Delta r =
+  \sqrt{\frac{2(n+1/2)}{\mu\omega}}\cos\phi,
+  \qquad
+  p_r =
+  -\sqrt{2(n+1/2)\mu\omega}\sin\phi,
+\end{equation}
+followed by construction of two Cartesian atoms along the molecular axis and removal of center-of-mass motion.
+
+For Morse diatomics, Smite implements a rotating Morse oscillator sampling based on the Porter--Raff--Miller formulation.  The user supplies $r_e$, $D_e$, and either $\beta$ or $\alpha$.  The Morse zero-order frequency is
+\begin{equation}
+  \omega_0=\beta\sqrt{\frac{2D_e}{\mu}},
+\end{equation}
+and the rovibrational energy includes harmonic, anharmonic, centrifugal, and rovibrational coupling terms.  The Morse coordinate $\xi=\exp[-\beta(r-r_e)]$ and $p_r$ are sampled from the corresponding phase-space construction.  In this model the rotational quantum number enters the vibrational coordinate sampling, so rovibrational sampling is coupled rather than applied as two independent steps.
+
+\subsection{Rotational sampling}
+
+Rotational excitation is requested through \texttt{init\_rot\_type}.  The two implemented options are:
+\begin{itemize}
+  \item \texttt{Jfix}: a fixed rotational quantum number $J$;
+  \item \texttt{Temp}: thermal angular momentum or thermal rotational quantum-number sampling.
+\end{itemize}
+
+For fixed-$J$ sampling the angular momentum magnitude is
+\begin{equation}
+  |\mathbf{J}| = \sqrt{J(J+1)}
+\end{equation}
+in atomic units.  The direction of $\mathbf{J}$ is randomized.  For diatomics, the angular momentum lies perpendicular to the molecular axis.  For polyatomic fragments, the angular momentum vector is sampled in three dimensions, corrected for any vibrational angular momentum already present,
+\begin{equation}
+  \mathbf{J}_{\mathrm{sample}} =
+  \mathbf{J}_{\mathrm{target}} - \mathbf{J}_{\mathrm{vib}},
+\end{equation}
+and converted to angular velocity by solving $\mathbf{I}\boldsymbol{\omega}=\mathbf{J}_{\mathrm{sample}}$.  The rotational momenta are then added atom by atom as
+\begin{equation}
+  \mathbf{p}_i \leftarrow \mathbf{p}_i + m_i(\boldsymbol{\omega}\times\mathbf{r}_i).
+\end{equation}
+
+Thermal polyatomic rotation is sampled with symmetric-top formulas, using prolate, oblate, or near-spherical branches depending on the principal moments of inertia.  Thermal diatomic rotation samples $J$ from the spherical-top distribution associated with the moment of inertia.
+
+\subsection{Sampling from previous MD}
+
+For polyatomic fragments initialized with \texttt{fromMD=True}, Smite can read a previous trajectory file containing coordinates and momenta and randomly choose one saved frame as the starting condition.  A simpler \texttt{MDprimitive} option assigns random momenta at a requested temperature without normal-mode quantization.
+
+\section{Bimolecular Relative Initial Coordinates}
+
+\subsection{Collision-energy sampling}
+
+For bimolecular collisions the user specifies the initial center-of-mass separation $R_{\mathrm{ini}}$, maximum impact parameter $b_{\max}$, and either a fixed collision energy or a collision temperature.  Fixed collision energies are supplied in kJ mol$^{-1}$ and converted to hartree.  Thermal collision energies use the Maxwell--Boltzmann relative translational energy distribution sampled by
+\begin{equation}
+  E_{\mathrm{coll}} = -RT\ln(\xi_1\xi_2),
+\end{equation}
+where $\xi_1$ and $\xi_2$ are independent uniform random numbers.
+
+\subsection{Impact-parameter options}
+
+The impact parameter can be selected in three ways:
+\begin{itemize}
+  \item \texttt{bsampling=0}: fixed impact parameter, $b=b_{\max}$;
+  \item \texttt{bsampling=1}: linear sampling, $b=b_{\max}\xi$;
+  \item \texttt{bsampling=2}: area-uniform sampling, $b=b_{\max}\sqrt{\xi}$.
+\end{itemize}
+The area-uniform option corresponds to uniform sampling over the collision disk.
+
+\subsection{Gas-phase molecule--molecule geometry}
+
+Before relative coordinates are assigned, each fragment is shifted to its own center-of-mass frame.  Fragment B is placed relative to fragment A with initial center-of-mass distance $R_{\mathrm{ini}}$ and impact parameter $b$:
+\begin{equation}
+  x_{\mathrm{sep}} = \sqrt{R_{\mathrm{ini}}^2-b^2}.
+\end{equation}
+The code translates all atoms of fragment B by $x_{\mathrm{sep}}$ along the laboratory $x$ axis and by $b$ along the laboratory $z$ axis.  With fragment masses $M_A$ and $M_B$, reduced mass
+\begin{equation}
+  \mu = \frac{M_A M_B}{M_A+M_B},
+\end{equation}
+and collision energy $E_{\mathrm{coll}}$, the relative speed is
+\begin{equation}
+  v_{\mathrm{rel}} = \sqrt{\frac{2E_{\mathrm{coll}}}{\mu}}.
+\end{equation}
+The center-of-mass velocities assigned to the two reactants are
+\begin{equation}
+  v_A = v_{\mathrm{rel}}\frac{M_B}{M_A+M_B},
+  \qquad
+  v_B = v_A-v_{\mathrm{rel}},
+\end{equation}
+and are converted to atomic momenta by multiplying by each atom's mass.  The resulting total center-of-mass momentum is zero.
+
+\subsection{Surface collision geometry}
+
+For molecule-surface collisions one fragment can be marked as a surface.  The surface is oriented into the laboratory $yz$ plane so that its normal points along the $x$ axis.  The projectile incidence direction is controlled by an incidence/skew angle.  If \texttt{surf\_skew\_fix} is not supplied, the skew angle is sampled over a spherical cap using
+\begin{equation}
+  \cos\theta = 1-\xi\left(1-\cos\theta_{\max}\right),
+\end{equation}
+which gives uniform solid-angle sampling up to \texttt{surf\_skew\_max}.  The azimuthal direction in the surface plane is also randomized.  The projectile is translated to the initial separation and given a velocity directed toward the surface.
+
+\subsection{Trajectory stopping criteria}
+
+Trajectories can stop by either:
+\begin{itemize}
+  \item a general separation threshold \texttt{Rstop};
+  \item a channel-specific list of pair-distance conditions \texttt{pairs\_to\_stop}.
+\end{itemize}
+The channel-specific form supports conditions such as ``distance between atoms $i$ and $j$ greater than a threshold'' or ``less than a threshold'', grouped by product-channel label.  This is useful for distinguishing nonreactive scattering, abstraction, association, or dissociation products.
+
+\section{Quantum-Chemistry and PES Interfaces}
+
+\subsection{Common input dictionary}
+
+All electronic-structure and PES backends use a dictionary-like \texttt{qcinput}.  The common keys are summarized in Table~\ref{tab:qcinput}.
+
+
+\begin{table}[h]
+\centering
+\caption{Common \texttt{qcinput} keys used by the force and energy interfaces.}
+\label{tab:qcinput}
+\begin{tabular}{>{\ttfamily}p{0.24\linewidth}p{0.66\linewidth}}
+\toprule
+\normalfont Key & Meaning \\
+\midrule
+qchem & Backend selector. Supported values are listed below the table. \\
+path & Executable path for external binary backends, or PES path/name information. \\
+nproc & Number of processor threads requested for the backend. \\
+functional & Electronic-structure method, density functional, semiempirical method, or xTB method option. \\
+basis & Basis set for backends that require one. \\
+charge & Total molecular charge. \\
+multiplicity & Spin multiplicity, $2S+1$. \\
+additional & Backend-specific extra keywords or command-line options. \\
+wfu & Whether to save wavefunction/orbital information along the trajectory. \\
+scratch\_dir & Runtime scratch directory, usually assigned per trajectory. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The supported \texttt{qchem} values are \texttt{XTB}, \texttt{Orca}, \texttt{PySCF}, \texttt{Psi4}, \texttt{Sparrow\_bin}, \texttt{Sparrow\_Py}, and \texttt{PES}.
+
+The input validator normalizes backend aliases such as \texttt{orca}, \texttt{xtb}, \texttt{pyscf}, \texttt{psi4}, and \texttt{pes}, fills defaults, checks integer charge/multiplicity/thread counts, verifies required executable paths for binary backends, and rejects unsupported backends.
+
+\subsection{Energy and force dispatch}
+
+The trajectory propagators call a common force routine.  For each geometry, Smite dispatches to the selected backend, obtains an energy and/or gradient, and returns Cartesian forces with the convention
+\begin{equation}
+  \mathbf{F} = -\nabla_{\mathbf{q}} V(\mathbf{q}).
+\end{equation}
+Supported backends are:
+\begin{itemize}
+  \item \texttt{XTB}: external xTB executable, with gradient parsing from xTB output;
+  \item \texttt{Orca}: ORCA input generation with \texttt{engrad}, gradient parsing, and optional orbital restart through previous \texttt{.gbw} files;
+  \item \texttt{PySCF}: in-process PySCF RKS/UKS DFT energy, gradient, and Hessian calls;
+  \item \texttt{Psi4}: in-process Psi4 RKS/UKS energy and gradient calls, with a more robust fallback SCF option for difficult points;
+  \item \texttt{Sparrow\_bin}: external Sparrow executable;
+  \item \texttt{Sparrow\_Py}: Python Sparrow interface;
+  \item \texttt{PES}: user-provided analytic, fitted, or machine-learning PES interface.
+\end{itemize}
+
+After a force call, the corresponding energy and force can be cached in \texttt{qcinput}.  If the next energy call is requested at exactly the same coordinates and atom ordering, the cached value is reused.  This avoids duplicate backend evaluations in the common velocity-Verlet pattern where a force and then an energy are needed for the same geometry.
+
+\subsection{Scratch management and parallel runs}
+
+Backend scratch files are isolated through \texttt{scratch\_dir}.  A single trajectory assigns scratch under \texttt{scratch/<trajectory-name>/}.  Parallel trajectories create per-trajectory output directories such as \texttt{run\_name/traj\_000003/} and scratch directories such as \texttt{scratch/run\_name/traj\_000003/}.  Each parallel worker receives its own copy of the molecular system, its own trajectory and backup files, its own initial-condition summary, and its own backend scratch path.  External quantum-chemistry backends receive the requested \texttt{nproc} per job.  PES jobs can be forced to one core by default because many fitted PES calls are not threaded.
+
+Backend helpers check executable paths, capture standard output and standard error, report parse errors with useful context, and can optionally retry a backend after cleaning its scratch directory.
+
+\subsection{Wavefunction output}
+
+If \texttt{wfu=True}, selected backends can write wavefunction information along the trajectory.  ORCA wavefunctions are converted from \texttt{.gbw} to Molden format through the ORCA \texttt{\_2mkl} utility.  PySCF and Psi4 write Molden-style output directly through their Python interfaces.  PES backends reject \texttt{wfu=True}, because a classical PES does not produce an electronic wavefunction.
+
+\subsection{Hessians for normal-mode sampling and optimization}
+
+Hessians are obtained through the same backend abstraction and are cached to text files such as \texttt{hessian\_<name>.hess}.  Existing Hessian files are reused unless forced recalculation is requested.  ORCA and PySCF can provide direct Hessian calculations.  Psi4, XTB, Sparrow, and generic PES interfaces can provide numerical Hessians by finite differences of analytical gradients or forces when no analytic Hessian method is available.  PES interfaces can also expose a direct \texttt{hessian(q, atoms)} method.
+
+\subsection{Analytic, fitted, and machine-learning PES interface}
+
+The generic \texttt{PES} backend is designed for analytic surfaces, fitted surfaces, and machine-learning potentials that can be called from Python.  A PES directory contains a \texttt{pes\_interface.py} file defining a \texttt{PESCalculator} class.  The calculator must provide
+\begin{itemize}
+  \item \texttt{energy(q, atoms)}; and
+  \item either \texttt{force(q, atoms)} or \texttt{gradient(q, atoms)}.
+\end{itemize}
+Coordinates are supplied in bohr and atom labels are supplied as the trajectory atom list.  If the calculator defines \texttt{gradient}, Smite converts it to force by a minus sign.  If it defines \texttt{hessian}, that Hessian is used directly; otherwise a finite-difference Hessian is available.  A separate validation helper checks PES energy, force, and a finite-difference gradient component to verify the sign convention and numerical consistency.
+
+\section{Standalone Optimization and Reaction-Path Tools}
+
+Although this document emphasizes QCT dynamics and force interfaces, the same backend layer is used by the standalone optimization module.  The optimizer package exposes:
+\begin{itemize}
+  \item minimum-energy geometry optimization;
+  \item transition-state optimization;
+  \item redundant internal-coordinate optimization;
+  \item RDA-based quasi-TS guess generation from reactant and product endpoint structures;
+  \item spin-crossing optimization using two spin-state gradients;
+  \item intrinsic reaction coordinate following;
+  \item one- and two-dimensional coordinate scans and normal-mode scans.
+\end{itemize}
+The optimizer can use the Smite force/Hessian backend or selected external optimizer behavior, depending on the provided \texttt{OptimizerConfig}.  It therefore supports the same ab initio and PES backends as the trajectory code.
+
+\section{Output Files and Diagnostics}
+
+Trajectory files are written in an extended XYZ-like format with one frame per saved step.  Each frame contains atom labels, coordinates, momenta, potential energy, kinetic energy, energy drift, simulation time, and instantaneous temperature.  Backup files store the latest geometry and momenta for restart use.  Optional diagnostics include:
+\begin{itemize}
+  \item sampled normal-mode energy recovery files;
+  \item vibrational spectra from saved velocity histories;
+  \item time-dependent scattering form factors;
+  \item post-collision vector-correlation analysis;
+  \item per-trajectory parallel status files in JSON format;
+  \item suppressed worker output logs for parallel runs.
+\end{itemize}
+
+\section{Representative User-Level Options}
+
+At the input-script level, the most important QCT controls are:
+\begin{itemize}
+  \item fragment construction: atom, diatom, polyatom, rigid, nonrigid, surface, or from previous MD;
+  \item vibrational sampling: \texttt{ZPE}, \texttt{Temp}, \texttt{Wigner}, per-mode \texttt{fix\_quantum}, \texttt{fix\_energy}, \texttt{fix\_temp}, and \texttt{fix\_wigner};
+  \item rotational sampling: \texttt{Jfix} or \texttt{Temp};
+  \item diatom model: harmonic or Morse;
+  \item collision setup: \texttt{Rini}, \texttt{bmax}, \texttt{bsampling}, fixed \texttt{Ecoll}, or thermal \texttt{Ecoll\_thermal};
+  \item surface setup: surface side, maximum or fixed skew/incidence angle, and random azimuthal orientation;
+  \item propagation: integrator name, integrator order, timestep, maximum step count, and print stride;
+  \item thermalization: Berendsen, Andersen, Nose--Hoover, or GLE thermostat with target temperature and coupling parameter;
+  \item stopping conditions: \texttt{Rstop} or channel-specific \texttt{pairs\_to\_stop};
+  \item backend: \texttt{XTB}, \texttt{Orca}, \texttt{PySCF}, \texttt{Psi4}, \texttt{Sparrow\_bin}, \texttt{Sparrow\_Py}, or \texttt{PES};
+  \item parallelism: total trajectories, number of simultaneous jobs, processors per job, output directory, scratch directory, and error policy.
+\end{itemize}
+
+\end{document}

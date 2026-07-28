@@ -6,10 +6,16 @@
 ################################################################################
 
 F2PY=f2py
+FC=gfortran
+FFLAGS=-O2 -fPIC
+SHARED_TARGET=libohch4_pes.so
 
-.PHONY: all build pyf clean
+.PHONY: all shared build pyf clean
 
-all: build
+all: shared
+
+shared:
+	$(FC) -shared $(FFLAGS) -o $(SHARED_TARGET) ohch4_c_interface.f90 ch4oh.f utility.f
 
 build:
 	$(F2PY) -c ch4oh.f utility.f ch4oh.pyf
@@ -18,4 +24,4 @@ pyf:
 	$(F2PY) -m PES -h ch4oh.pyf ch4oh.f --overwrite-signature
 
 clean:
-	rm -f *.o *.so
+	rm -f *.o *.mod *.so $(SHARED_TARGET)

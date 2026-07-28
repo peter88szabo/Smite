@@ -1,8 +1,20 @@
-import subprocess
 import numpy as np
 import os
 import re
+import shlex
 from io import StringIO
+
+from utils.constants import ANGSTROM_TO_BOHR, BOHR_TO_ANGSTROM
+from qchem_interfaces.backend_common import (
+    QCBackendError,
+    backend_scratch_dir,
+    cleanup_backend_scratch,
+    parse_error,
+    run_backend_command,
+    should_retry_backend,
+)
+from qchem_interfaces.energy_cache import store_energy
+from qchem_interfaces.wavefunction_output import prepare_wavefunction_output, require_wavefunction_file
 
 def parseXTB_energy(s):
     match = re.search(r"TOTAL ENERGY\s+(-?\d+\.\d+)", s)
@@ -10,34 +22,43 @@ def parseXTB_energy(s):
     if match:
         energy = float(match.group(1))
     else:
-        print("Total energy not found in the XTB output.")
+        raise parse_error("xTB", "total energy was not found in stdout", stdout=s)
 
     return energy
 
 def parseXTB_grad(gradfile, natom):
-    with open(gradfile, "r") as f:
-         data = f.readlines()
+    if not os.path.exists(gradfile):
+        raise parse_error("xTB", "gradient file was not produced", filename=gradfile)
+    try:
+        with open(gradfile, "r") as f:
+             data = f.readlines()
 
-    gradxyz = ''.join(data[(natom+2):(2*natom+2)])
+        gradxyz = ''.join(data[(natom+2):(2*natom+2)])
 
-       # Split the XYZ string into lines
-    lines = gradxyz.strip().split('\n')
-       # Count the number of lines that contain atomic coordinates
-       #(excluding any empty or whitespace-only lines)
+           # Split the XYZ string into lines
+        lines = gradxyz.strip().split('\n')
+           # Count the number of lines that contain atomic coordinates
+           #(excluding any empty or whitespace-only lines)
 
-    grad = []
-    # Loop through the lines and extract the gradient components
-    for line in lines:
-        parts = line.split()
-        x, y, z = float(parts[0]), float(parts[1]), float(parts[2])
-        grad.extend([x, y, z])
+        grad = []
+        # Loop through the lines and extract the gradient components
+        for line in lines:
+            parts = line.split()
+            if len(parts) < 3:
+                raise ValueError(f"short gradient line: {line!r}")
+            x, y, z = float(parts[0]), float(parts[1]), float(parts[2])
+            grad.extend([x, y, z])
+    except Exception as exc:
+        raise parse_error("xTB", f"could not read gradient: {exc}", filename=gradfile, cause=exc) from exc
 
-    return np.array(grad)
+    grad = np.array(grad)
+    expected = 3 * int(natom)
+    if grad.size != expected:
+        raise parse_error("xTB", f"gradient has {grad.size} elements, expected {expected}", filename=gradfile)
+    return grad
 
 
 def print_structure(atoms, q, filename):
-    b2a = 0.52917721092
-
     with open(filename, "w") as file:
         file.write(str(len(atoms)) + "\n")
         file.write("This is a temporary strucutre for Sparrow to calculate energy and gradient\n")
@@ -45,65 +66,51 @@ def print_structure(atoms, q, filename):
             jx = 3 * i
             jy = 3 * i + 1
             jz = 3 * i + 2
-            file.write("%3s %15.5f  %15.5f %15.5f\n" % (atoms[i], q[jx] * b2a, q[jy] * b2a, q[jz] * b2a))
+            file.write("%3s %15.5f  %15.5f %15.5f\n" % (atoms[i], q[jx] * BOHR_TO_ANGSTROM, q[jy] * BOHR_TO_ANGSTROM, q[jz] * BOHR_TO_ANGSTROM))
 
 
-def call_XTB(q, atoms, path, charge, multiplicity, method, arg, additional, natom):
-    if not path:
-            print("Cannot determine XTB PATH")
-            exit()
-
+def _call_XTB_once(q, atoms, path, charge, multiplicity, method, arg, additional, natom, scratch_dir=None):
     fname = 'xtb_geom_file_for_abinitioMD.xyz'
     gname = 'gradient'
 
-    #directory = 'xtb_tmp'
-    #if not os.path.exists(directory):
-    #    os.makedirs(directory)
+    directory = backend_scratch_dir({"scratch_dir": scratch_dir}, 'xtb', 'xtb_tmp')
 
-    #inputfile = os.path.join(directory, fname)
-    #gradfile  = os.path.join(directory, gname)
-    inputfile = fname
-    gradfile  = gname
+    inputfile = os.path.join(directory, fname)
+    gradfile  = os.path.join(directory, gname)
 
     print_structure(atoms, q, inputfile)
 
+    extra_args = shlex.split(additional) if additional else []
+    method_args = ["--gfn", method] if method else []
+
     if multiplicity == 1:
-        command = [path, inputfile, "-c", str(charge), arg, additional]
-        command_restart = [path, inputfile, "-c", str(charge), arg, additional, "--etemp 1000.0", "--gfnff", "--acc 200"] 
-        ##command_restart = [path, inputfile, "-c", str(charge), arg, additional, "--etemp 1000.0", "--acc 200"] 
-        #command_restart = [path, inputfile, "-c", str(charge), arg, additional, "--etemp 1000.0", "&&",  
-        #                   path, inputfile, "-c", str(charge), arg, additional, "--restart"]
+        # Split user-supplied xTB options into proper CLI tokens.
+        # Passing "--acc 10" as one list element makes subprocess deliver it
+        # as a single malformed argument, so xTB never sees the intended flag/value pair.
+        command = [path, fname, "-c", str(charge), *method_args, arg, *extra_args]
     else:
-        command = [path, inputfile, "-c", str(charge), "-u", str(multiplicity-1), arg, additional]
-        command_restart = [path, inputfile, "-c", str(charge), "-u", str(multiplicity-1), arg, additional, "--etemp 1000.0", "--gfnff", "--acc 200"]
-        ###command_restart = [path, inputfile, "-c", str(charge), "-u", str(multiplicity-1), arg, additional, "--etemp 1000.0", "--acc 200"]
-        #command_restart = [path, inputfile, "-c", str(charge), "-u", str(multiplicity-1), arg, additional, "--etemp 1000.0", "&&",
-        #                   path, inputfile, "-c", str(charge), "-u", str(multiplicity-1), arg, additional, "--restart"]
+        command = [path, fname, "-c", str(charge), "-u", str(multiplicity-1), *method_args, arg, *extra_args]
 
-    result = subprocess.run(command, stdout=subprocess.PIPE, text=True)
+    result = run_backend_command(command, cwd=directory, backend_name="xTB")
 
-    if result.returncode == 0:
-        ene  =  parseXTB_energy(result.stdout)
-        if arg == "--grad":
-           gradfile = 'gradient'
-           grad =  parseXTB_grad(gradfile, natom)
-        else:
-           grad = [0.0]*3*natom
+    ene = parseXTB_energy(result.stdout)
+    if arg == "--grad":
+       grad = parseXTB_grad(gradfile, natom)
     else:
-        result_restart = subprocess.run(command_restart, stdout=subprocess.PIPE, text=True)
-
-        if result_restart.returncode == 0:
-           print("GFNFF calc in progress")
-           ene  =  parseXTB_energy(result_restart.stdout)
-           if arg == "--grad":
-              gradfile = 'gradient'
-              grad =  parseXTB_grad(gradfile, natom)
-           else:
-              grad = [0.0]*3*natom
-        else:
-           print("SPARROW command failed even after restart. Exit code:", result.returncode)
+       grad = [0.0]*3*natom
 
     return (ene, grad)
+
+
+def call_XTB(q, atoms, path, charge, multiplicity, method, arg, additional, natom, scratch_dir=None, qcinput=None):
+    qcinput = qcinput or {"scratch_dir": scratch_dir}
+    try:
+        return _call_XTB_once(q, atoms, path, charge, multiplicity, method, arg, additional, natom, scratch_dir=scratch_dir)
+    except QCBackendError:
+        if not should_retry_backend(qcinput):
+            raise
+        cleanup_backend_scratch({"scratch_dir": scratch_dir}, "xtb", "xtb_tmp")
+        return _call_XTB_once(q, atoms, path, charge, multiplicity, method, arg, additional, natom, scratch_dir=scratch_dir)
 
 
 
@@ -139,12 +146,13 @@ def XTB_Force(q, atoms, qcinput):
     charge       =  qcinput['charge']
     multiplicity =  qcinput['multiplicity']
     additional   =  qcinput['additional']
+    scratch_dir  =  qcinput.get('scratch_dir')
     natom        =  len(atoms)
     arg          = "--grad"
 
-    ene, grad = call_XTB(q, atoms, path, charge, multiplicity, method, arg, additional, natom) 
-
+    ene, grad = call_XTB(q, atoms, path, charge, multiplicity, method, arg, additional, natom, scratch_dir=scratch_dir, qcinput=qcinput) 
     force = -np.reshape(grad,3*natom)
+    store_energy(qcinput, q, atoms, ene, force=force)
 
     return force
  
@@ -157,19 +165,27 @@ def XTB_Energy(file_wf, q, atoms, qcinput):
     charge       =  qcinput['charge']
     multiplicity =  qcinput['multiplicity']
     additional   =  qcinput['additional']
+    scratch_dir  =  qcinput.get('scratch_dir')
     natom        =  len(atoms)
     wfu          =  qcinput['wfu'] #wfu for wavefunction or dipole (molden format) calculation
 
-    arg = "--dipole"
+    arg = "--grad"
                       
     if wfu == True:
        arg = "--molden"
 
-    ene, grad = call_XTB(q, atoms, path, charge, multiplicity, method, arg, additional,  natom)
+    ene, grad = call_XTB(q, atoms, path, charge, multiplicity, method, arg, additional,  natom, scratch_dir=scratch_dir, qcinput=qcinput)
 
+    if not wfu:
+       force = -np.reshape(grad,3*natom)
+       store_energy(qcinput, q, atoms, ene, force=force)
 
     if wfu == True:
-       shutil.copyfile("molden.input", file_wf)
+       file_wf = prepare_wavefunction_output(file_wf, "xTB")
+       molden_dir = backend_scratch_dir({"scratch_dir": scratch_dir}, 'xtb', 'xtb_tmp')
+       molden_file = os.path.join(molden_dir, "molden.input")
+       require_wavefunction_file(molden_file, "xTB")
+       shutil.copyfile(molden_file, file_wf)
 
     return ene
 
@@ -195,8 +211,6 @@ if __name__ == '__main__':
 
         q = np.array(q)
         return Natoms, atoms, q
-
-    c1 = 0.52917721092  # [bohr]    * c1 = [Ansgtrom] 
 
     qcinput = {
     'qchem': 'XTB',
@@ -234,7 +248,7 @@ if __name__ == '__main__':
      '''
     natom, atoms, q = parseXYZ(xyz)
 
-    q = np.array(q) / c1
+    q = np.array(q) * ANGSTROM_TO_BOHR
 
     ene = XTB_Energy(file_wf, q, atoms, qcinput)
     grad = XTB_Force(q, atoms, qcinput)

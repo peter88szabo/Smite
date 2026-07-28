@@ -1,5 +1,13 @@
 import numpy as np
 
+def center_coordinates(mass, q):
+    q = np.asarray(q, dtype=float).copy()
+    mass = np.asarray(mass, dtype=float)
+    xyz = q.reshape(-1, 3)
+    center = np.sum(xyz * mass[:, None], axis=0) / np.sum(mass)
+    return (xyz - center).reshape(-1)
+
+
 def build_bmat(mass, q):
     ndim = len(q)
     natom = ndim // 3
@@ -27,21 +35,15 @@ def build_bmat(mass, q):
 def get_eckart_projector(mass, q):
     # Ref: J. W. McIver J. Chern. Phys., Vol. 88, No. 2, 15 January 1988
 
+    q = center_coordinates(mass, q)
     bmat = build_bmat(mass, q)
-    bmat_tr = np.transpose(bmat)
 
-   #see Eq D8 in the Appendix of Ref
-    smat = np.matmul(bmat_tr, bmat)
-
-    smat_inv = np.linalg.inv(smat)
-
-    sinv_bt = np.matmul(smat_inv, bmat_tr)
-
-   # R = 3 translation + 3 rotation projector 
-   # see Eq D2 and D9 in the Appendix of Ref
-    rmat = np.matmul(bmat, sinv_bt)
-
-    return rmat
+    # B @ pinv(B) projects onto the independent external vectors.  Its rank is
+    # six for a nonlinear molecule and five for an exactly linear molecule.
+    # Using the pseudoinverse avoids squaring B's condition number through
+    # inv(B.T @ B) and handles the null rotation about a linear molecular axis.
+    rmat = bmat @ np.linalg.pinv(bmat, rcond=1.0e-12)
+    return 0.5 * (rmat + rmat.T)
 
 def eckart_transform(mass, q, hess):
     #Eckart transformation:
@@ -63,11 +65,13 @@ def eckart_transform(mass, q, hess):
    # P = 1 - R, see Eq 35 in Ref
     proj = np.identity(ndim) - rmat
 
+    hess = 0.5 * (np.asarray(hess, dtype=float) + np.asarray(hess, dtype=float).T)
+    proj = 0.5 * (proj + proj.T)
     hess_proj = np.matmul(hess, proj)
 
     hess_eckart = np.matmul(proj, hess_proj)
 
-    return hess_eckart
+    return 0.5 * (hess_eckart + hess_eckart.T)
 
 
 def eckart_reactionpath_transform(mass, q, grad, hess):
@@ -101,16 +105,7 @@ def eckart_reactionpath_transform(mass, q, grad, hess):
 #from polyatom         import getNormalmode
 #from cenmass import cenmass
 
-#c1 = 0.52917721092  # [bohr]    * c1 = [Ansgtrom] 
-#c3 = 1838.6836605e0 # [g/mol]   * c3 = [electron mass unit]
-#c6 = 41.341105      # [fs]      * c6 = [time in au]
-#c7 = 2625.5         # [Hartree] * c7 = [kJ/mol] 
-#Rgas = 8.3144598/1000.0/c7 #Hartree/K 
 
-#mH = 1.00782503223*c3
-#mC = 12.011*c3
-#mN = 14.007*c3
-#mO = 15.999*c3
 
 #-----------------------------------------------------------------
 #charge = 0
@@ -134,11 +129,9 @@ def eckart_reactionpath_transform(mass, q, grad, hess):
 # O  -1.235931  -0.000065  -2.082955
 # O  -2.416230  -0.000207  -0.045999
 # '''
-#mass =  [mC]*6 + [mH]*5 + [mN] + [mO]*2
 #hessFile = 'hessian_NO2-benzene_B3LYP_STO3G.hess'
 
 #Natoms, atoms, q = parseXYZ(xyz)
-#q = np.array(q) / c1
 #-----------------------------------------------------------------
 
 
@@ -154,11 +147,9 @@ def eckart_reactionpath_transform(mass, q, grad, hess):
 #  H   0.03988406002555      0.00000000000000      0.96552726825997
 #  H   0.92361641123187      0.00000000000000     -0.28423843745812
 # '''
-#mass = [mO, mH, mH]
 #hessFile = 'Water_B3LYP_STO3G.hess'
 
 #Natoms, atoms, q = parseXYZ(xyz)
-#q = np.array(q) / c1
 #-----------------------------------------------------------------
 
 #hess = getHessian(hessFile, Natoms, xyz, charge, multiplicity, functional, base)

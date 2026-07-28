@@ -1,5 +1,6 @@
 import numpy as np
 import random
+from utils.constants import R_GAS_HARTREE_PER_K
 
 def random_initialize_momenta(wmass, Temp_init):
     """
@@ -14,7 +15,7 @@ def random_initialize_momenta(wmass, Temp_init):
     But we calculate here momenta instead of velocities
     """
 
-    RT = (8.3144598/1000.0/2625.5) * Temp_init  #Rgas in Hartree/K
+    RT = R_GAS_HARTREE_PER_K * Temp_init
 
 
     p = np.zeros(len(wmass))

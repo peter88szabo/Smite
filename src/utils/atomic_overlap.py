@@ -1,10 +1,11 @@
 import numpy as np
+from utils.constants import ANGSTROM_TO_BOHR
 def check_atomic_overlap(atoms, q, **kwargs):
 
     # Default threshold values
-    H_H_threshold = kwargs.get('H_H_threshold', 0.4/0.52917721092)
-    H_X_threshold = kwargs.get('H_X_threshold', 0.5/0.52917721092)
-    X_X_threshold = kwargs.get('X_X_threshold', 0.8/0.52917721092)
+    H_H_threshold = kwargs.get('H_H_threshold', 0.4 * ANGSTROM_TO_BOHR)
+    H_X_threshold = kwargs.get('H_X_threshold', 0.5 * ANGSTROM_TO_BOHR)
+    X_X_threshold = kwargs.get('X_X_threshold', 0.8 * ANGSTROM_TO_BOHR)
 
     N = len(atoms)
     coordinates = np.reshape(q, (N, 3))

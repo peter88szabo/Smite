@@ -1,141 +1,129 @@
+import os
+
 import numpy as np
-from scipy.linalg import expm
-from math import sqrt
 
-class MDGLE:
-    def __init__(self):
-        # Initialize parameters and matrices as None or zero.
-        self.gS = None
-        self.gT = None
-        self.gp = None
-        self.ngp = None
-        self.wnt = 0.0
-        self.wns = 0.0
-        self.langham = 0.0
-        self.ns = 0
 
-    def wn_init(self, dt, wopt, kt):
-        """
-        Initialize white-noise thermostat parameters.
-        
-        Parameters:
-            dt (float): Time step.
-            wopt (float): Optimized frequency.
-            kt (float): Boltzmann constant times temperature.
-        
-        Initializes:
-            wnt (float): White-noise thermostat parameter.
-            wns (float): Standard deviation for noise.
-            langham (float): Langevin conserved quantity accumulator.
-        """
-        g = 2.0 * wopt
-        self.wnt = np.exp(-dt * g)
-        self.wns = sqrt(kt * (1.0 - self.wnt ** 2))
-        self.langham = 0.0  # Langevin conserved quantity accumulator
+def _read_gle_matrix(path, expected_ns=None):
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"GLE matrix file not found: {path}")
 
-    def wn_step(self, p, ndim):
-        """
-        White-noise propagation step for momentum.
-        
-        Parameters:
-            p (numpy array): Momentum vector.
-            ndim (int): Number of dimensions.
-        
-        Returns:
-            p (numpy array): Updated momentum vector.
-        """
-        for i in range(ndim):
-            p[i] = self.wnt * p[i] + self.wns * np.random.normal()
-        return p
+    with open(path, "r") as handle:
+        rows = [
+            line.split()
+            for line in handle
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
 
-    def gle_init(self, dt, wopt, kt, ndim):
-        """
-        Initialize GLE thermostat parameters.
-        
-        Parameters:
-            dt (float): Time step.
-            wopt (float): Optimized frequency.
-            kt (float): Boltzmann constant times temperature.
-            ndim (int): Number of dimensions.
-        
-        Initializes:
-            gT (numpy array): Deterministic part of propagator.
-            gS (numpy array): Stochastic part of propagator.
-            gp (numpy array): Auxiliary momentum matrix.
-        """
-        print("Initialization of GLE thermostat.")
-        
-        # Load GLE-A matrix
-        gA = np.loadtxt('GLE-A') * wopt
-        self.ns = gA.shape[0] - 1
+    if not rows:
+        raise ValueError(f"GLE matrix file is empty: {path}")
 
-        # Load GLE-C matrix or initialize it as a diagonal matrix with kt
-        try:
-            gC = np.loadtxt('GLE-C')
-            assert gC.shape[0] == gA.shape[0]
-        except IOError:
-            print("Using canonical-sampling, Cp=kT")
+    first_row = rows[0]
+    if len(first_row) == 1 and len(rows) > 1:
+        ns = int(float(first_row[0]))
+        matrix = np.array([[float(value) for value in row] for row in rows[1:]], dtype=float)
+        expected_shape = (ns + 1, ns + 1)
+        if matrix.shape != expected_shape:
+            raise ValueError(f"{path} has shape {matrix.shape}, expected {expected_shape}")
+    else:
+        matrix = np.array([[float(value) for value in row] for row in rows], dtype=float)
+        if matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
+            raise ValueError(f"{path} must contain a square GLE matrix")
+        ns = matrix.shape[0] - 1
+
+    if expected_ns is not None and ns != expected_ns:
+        raise ValueError(f"GLE matrix size mismatch: {path} has ns={ns}, expected ns={expected_ns}")
+
+    return ns, matrix
+
+
+def matrix_exp(matrix, taylor_order=15, scale_power=15):
+    coeff = [1.0]
+    for i in range(1, taylor_order + 1):
+        coeff.append(coeff[-1] / float(i))
+
+    scaled = matrix / (2.0 ** scale_power)
+    expm = np.eye(matrix.shape[0]) * coeff[taylor_order]
+    for power in range(taylor_order - 1, -1, -1):
+        expm = scaled @ expm
+        expm += np.eye(matrix.shape[0]) * coeff[power]
+
+    for _ in range(scale_power):
+        expm = expm @ expm
+
+    return expm
+
+
+def cholesky_stabilized(matrix):
+    n = matrix.shape[0]
+    lmat = np.zeros_like(matrix, dtype=float)
+    dmat = np.zeros_like(matrix, dtype=float)
+
+    for i in range(n):
+        lmat[i, i] = 1.0
+        for j in range(i):
+            value = matrix[i, j]
+            for k in range(j):
+                value -= lmat[i, k] * lmat[j, k] * dmat[k, k]
+            lmat[i, j] = value / dmat[j, j] if dmat[j, j] != 0.0 else 0.0
+
+        value = matrix[i, i]
+        for k in range(i):
+            value -= lmat[i, k] * lmat[i, k] * dmat[k, k]
+        dmat[i, i] = np.sqrt(value) if value >= 0.0 else 0.0
+
+    return lmat @ dmat
+
+
+class GLEThermostat:
+    def __init__(self, dt, wopt, kt, ndim, a_file="GLE-A", c_file="GLE-C", rng=None):
+        if dt <= 0.0:
+            raise ValueError("GLE timestep must be positive")
+        if wopt <= 0.0:
+            raise ValueError("GLE wopt must be positive")
+        if kt <= 0.0:
+            raise ValueError("GLE temperature must be positive")
+
+        self.rng = rng if rng is not None else np.random.default_rng()
+        self.ns, gA = _read_gle_matrix(a_file)
+        gA = gA * wopt
+
+        if c_file is not None and os.path.exists(c_file):
+            _, gC = _read_gle_matrix(c_file, expected_ns=self.ns)
+        else:
             gC = np.eye(self.ns + 1) * kt
 
-        # Deterministic part of propagator
-        self.gT = expm(-dt * gA)
+        self.gT = matrix_exp(-dt * gA)
+        self.gS = cholesky_stabilized(gC - self.gT @ gC @ self.gT.T)
 
-        # Stochastic part
-        gA_temp = gC - self.gT @ gC @ self.gT.T
-        self.gS = self.cholesky_stabilized(gA_temp)
+        c_chol = cholesky_stabilized(gC)
+        noise = self.rng.normal(size=(ndim, self.ns + 1))
+        self.gp = noise @ c_chol.T
 
-        # Initialize auxiliary vectors
-        self.gp = np.zeros((ndim, self.ns + 1))
-        for j in range(ndim):
-            gr = np.random.normal(size=self.ns + 1)
-            self.gp[j, :] = self.gS @ gr
-        self.langham = 0.0
+    def step(self, p, wmass, nfix=0):
+        p = np.array(p, copy=True)
+        nactive = len(p) - int(nfix)
+        if nactive < 0:
+            raise ValueError("GLE nfix cannot exceed the number of momentum components")
+        active = np.arange(nactive)
+        if len(active) == 0:
+            return p
 
-    def gle_step(self, p, ndim):
-        """
-        GLE propagation step.
-        
-        Parameters:
-            p (numpy array): Momentum vector.
-            ndim (int): Number of dimensions.
-        
-        Returns:
-            p (numpy array): Updated momentum vector.
-        """
-        for j in range(ndim):
-            self.gp[j, 0] = p[j]
+        mass_sqrt = np.sqrt(np.asarray(wmass, dtype=float)[active])
+        self.gp[active, 0] = p[active] / mass_sqrt
 
-        # Deterministic update
-        self.ngp = self.gT @ self.gp.T
-        self.ngp = self.ngp.T
+        deterministic = self.gp[active, :] @ self.gT.T
+        noise = self.rng.normal(size=(len(active), self.ns + 1))
+        self.gp[active, :] = deterministic + noise @ self.gS.T
 
-        # Stochastic update
-        for j in range(ndim):
-            self.gp[j, :] = np.random.normal(size=self.ns + 1)
-        self.ngp += self.gS @ self.gp.T
-        self.gp = self.ngp.T
-
-        # Update momentum
-        for j in range(ndim):
-            p[j] = self.gp[j, 0]
-        
+        p[active] = self.gp[active, 0] * mass_sqrt
         return p
 
-    def cholesky_stabilized(self, M):
-        """
-        Stabilized Cholesky decomposition with handling for negative eigenvalues.
-        
-        Parameters:
-            M (numpy array): Matrix to decompose.
-        
-        Returns:
-            L (numpy array): Lower-triangular Cholesky factor.
-        """
-        try:
-            L = np.linalg.cholesky(M)
-        except np.linalg.LinAlgError:
-            L = np.zeros_like(M)
-            for i in range(M.shape[0]):
-                L[i, i] = sqrt(max(M[i, i], 0.0))
-        return L
 
+def make_gle_thermostat(dt, wopt, kt, ndim, a_file="GLE-A", c_file="GLE-C", rng=None):
+    return GLEThermostat(dt, wopt, kt, ndim, a_file=a_file, c_file=c_file, rng=rng)
+
+
+def thermo_gle(nfix, p, wmass, state):
+    if state is None:
+        raise ValueError("GLE thermostat state has not been initialized")
+    return state.step(p, wmass, nfix=nfix)

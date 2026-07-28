@@ -108,102 +108,39 @@ def thermal_rot_asymmetric_top_equipart(RT,Ixyz):
 #====================================================
 
 #====================================================
-def thermal_rot_symmetric_top(RT,Ixyz):
-#----------------------------------------------------
-#    oblate:  Ix = Iy < Iz  (plate shaped) 
-#       or    
-#    prolate: Ix < Iy = Iz  (cigar shaped)
-#----------------------------------------------------
+def thermal_rot_canonical_top(RT, Ixyz, zero_moment_tolerance=1.0e-12):
+    """Sample body-frame angular momentum from the canonical rigid-top law.
+
+    For principal moments ``I_i``, the rotational Hamiltonian is
+    ``sum_i L_i**2/(2 I_i)``. Consequently each active component is an
+    independent normal variate with variance ``I_i * RT``. This expression is
+    valid for asymmetric, symmetric, and spherical tops. A zero principal
+    moment (the molecular axis of a linear rotor) has no associated rotation
+    and is returned as exactly zero.
+    """
+    moments = np.asarray(Ixyz, dtype=float)
+    if moments.shape != (3,):
+        raise ValueError("Ixyz must contain exactly three principal moments")
+    if not np.isfinite(RT) or RT < 0.0:
+        raise ValueError("RT must be a finite, non-negative thermal energy")
+    if np.any(~np.isfinite(moments)):
+        raise ValueError("Principal moments must be finite")
+    if np.any(moments < -zero_moment_tolerance):
+        raise ValueError("Principal moments cannot be negative")
+
+    moments = np.where(moments <= zero_moment_tolerance, 0.0, moments)
     Lrot = np.zeros(3)
-
-    dd1 = abs(Ixyz[1]-Ixyz[0])
-    dd2 = abs(Ixyz[2]-Ixyz[1])
-
-    if dd1 < dd2 : top="oblate"
-    if dd1 > dd2 : top="prolate"
-
-    ##########################################################
-
-    if top == "oblate" :
-        #------------------------------------------
-        # Lz obeys the following distribution:
-        # P(Lz)=exp(-Lz^2/(2*Iz*RT)) where -inf<Lz<inf
-        # This is a Gaussian distribution
-        # thats variance is sigma**2 = Iz*RT
-        # and its mean mu = 0.0
-        #------------------------------------------
-
-        # random number with normal distribution
-        # thats variance is 1.0 and mean is 0.0
-        rnd_gauss = random.gauss(0.0, 1.0)
-
-        # therefore, Lz component can obtain as
-        Lrot[2] = np.sqrt(Ixyz[2]*RT)*rnd_gauss
-
-        #------------------------------------------
-        # L=Ltot obeys the following distiribution:
-        # L*exp(-L^2/(2*Iavg*RT)) where Lz < L < inf
-        # (remark: Ix=Iy < Iz)
-        # 
-        # where Iavg is the average inertia
-        # because sometimes the molecule is not 
-        # perfectly symmetric: Ix != Iy
-        #
-        # Iavg = sqrt(Ix*Iy)
-        #------------------------------------------
-        Iavg = np.sqrt(abs(Ixyz[0]*Ixyz[1]))
-
-        rand = random.uniform(0,1)
-        L = np.sqrt(Lrot[2]**2 - 2.0*Iavg*RT*np.log(1-rand))
-
-        angle = random.uniform(0,2*math.pi)
-
-        Lrot[0] = np.sqrt(L**2 - Lrot[2]**2)*np.cos(angle)
-        Lrot[1] = np.sqrt(L**2 - Lrot[2]**2)*np.sin(angle)
-
-    ################################################
-
-    if top == "prolate" :
-        #------------------------------------------
-        # Lx obeys the following distribution:
-        # P(Lx)=exp(-Lx^2/(2*Ix*RT)) where -inf<Lx<inf
-        # This is a Gaussian distribution
-        # thats variance is sigma**2 = Ix*RT
-        # and its mean mu = 0.0
-        #------------------------------------------
-
-        # random number with normal distribution
-        # thats variance is 1.0 and mean is 0.0
-        rnd_gauss = random.gauss(0.0, 1.0)
-
-        # therefore, Lx component can obtain as
-        Lrot[0] = np.sqrt(Ixyz[0]*RT)*rnd_gauss
-
-        #------------------------------------------
-        # L=Ltot obeys the following distiribution:
-        # L*exp(-L^2/(2*Iavg*RT)) where Lx < L < inf
-        # (remark: Ix < Iy = Iz)
-        #
-        # where Iavg is the average inertia
-        # because sometimes the molecule is not
-        # perfectly symmetric: Iy != Iz
-        #
-        # Iavg = sqrt(Iy*Iz)
-        #------------------------------------------
-        Iavg = np.sqrt(abs(Ixyz[1]*Ixyz[2]))
-
-        rand = random.uniform(0,1)
-        L = np.sqrt(Lrot[0]**2 - 2.0*Iavg*RT*np.log(1-rand))
-
-        angle = random.uniform(0,2*math.pi)
-
-        Lrot[2] = np.sqrt(L**2 - Lrot[0]**2)*np.cos(angle)
-        Lrot[1] = np.sqrt(L**2 - Lrot[0]**2)*np.sin(angle)
-    ##########################################################
-
-
+    for i, moment in enumerate(moments):
+        if moment > 0.0 and RT > 0.0:
+            Lrot[i] = random.gauss(0.0, math.sqrt(moment * RT))
     return Lrot
-#====================================================
+
+
+def thermal_rot_symmetric_top(RT, Ixyz):
+    """Backward-compatible name for the canonical general-top sampler."""
+    return thermal_rot_canonical_top(RT, Ixyz)
+
+
 
 
 '''
