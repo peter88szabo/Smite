@@ -2,6 +2,7 @@ import numpy as np
 import random
 import math
 import os
+import warnings
 from utils.cenmass             import cenmass
 from utils.constants           import ANGSTROM_TO_BOHR, ATOMIC_MASS_GMOL_TO_AU
 from utils.constants           import AU_ANGULAR_FREQUENCY_TO_CM1, CM1_TO_AU_ANGULAR_FREQUENCY
@@ -240,7 +241,8 @@ def specify_vib_modes(vib_modes, **kwargs):
 def polyatom_vibration_sampling(mass, atoms, q_eq, ww, L, vib_modes, **kwargs):
     '''
      q_eq: equilbiriom coords
-     ww: freq
+     ww: signed normal-mode angular frequencies; negative values denote
+         imaginary modes
      L: eigenvector of Hessians (Normal mode <--> Cartesian space transformator)
     '''
 #-------------------------------------------------------------------------------------------------------------------------------------------------
@@ -252,28 +254,83 @@ def polyatom_vibration_sampling(mass, atoms, q_eq, ww, L, vib_modes, **kwargs):
     traj_index =  kwargs.get('traj_index', -999)
     mode_energy_diagnostics = kwargs.get('mode_energy_diagnostics', True)
     mode_energy_file = kwargs.get('mode_energy_file', "sampled_mode_energy_diagnostics.dat")
+    imaginary_mode_policy = str(kwargs.get('imaginary_mode_policy', 'exclude')).lower()
+    warning_records = kwargs.get('sampling_warnings')
+    metadata_records = kwargs.get('sampling_metadata', warning_records)
+    thermal_frequency_cutoff_cm1 = float(kwargs.get('thermal_frequency_cutoff_cm1', 0.0))
     bond_th_HX = kwargs.get('bond_th_HX', 1.4 * ANGSTROM_TO_BOHR) # bond threshold in Angstrom for H-X, where X = any non H-atom
     bond_th_XX = kwargs.get('bond_th_XX', 2.0 * ANGSTROM_TO_BOHR) # bond threshold in Angstrom for X-X bonds to be considered as a part of a fragment
     #------------------------------------------------------------------------------------------
 
-    wmass = np.repeat(mass, 3)
+    if imaginary_mode_policy not in {'exclude', 'abs'}:
+        raise ValueError("imaginary_mode_policy must be 'exclude' (default) or 'abs'")
+    if warning_records is not None and not hasattr(warning_records, 'append'):
+        raise TypeError("sampling_warnings must be an appendable list when provided")
+    if metadata_records is not None and not hasattr(metadata_records, 'append'):
+        raise TypeError("sampling_metadata must be an appendable list when provided")
+    if not np.isfinite(thermal_frequency_cutoff_cm1) or thermal_frequency_cutoff_cm1 < 0.0:
+        raise ValueError("thermal_frequency_cutoff_cm1 must be finite and non-negative")
 
-    freq_cutoff = 100.0 #cm-1
+    wmass = np.repeat(mass, 3)
+    frequencies = np.asarray(ww, dtype=float).reshape(-1).copy()
 
     energy = []
     requested_energy = []
     nvib = []
     requested_nvib = []
-    freq_mode = np.zeros_like(ww)
-    q_norm = np.zeros(len(ww), dtype=float)
-    v_norm = np.zeros(len(ww), dtype=float)
+    freq_mode = frequencies * AU_ANGULAR_FREQUENCY_TO_CM1
+    q_norm = np.zeros(len(frequencies), dtype=float)
+    v_norm = np.zeros(len(frequencies), dtype=float)
+    excluded_modes = np.zeros(len(frequencies), dtype=bool)
     #the main loop running over the normal modes
     print("\nVibrational quantum number of sampled modes (freq in cm-1):")
-    for imode in range(len(ww)):
-
-        #In case of imaginary freqs (when ww is imaginary, it has a negative sign):
-        ww[imode] = abs(ww[imode])
-        freq_mode[imode] = ww[imode] * AU_ANGULAR_FREQUENCY_TO_CM1
+    for imode, signed_frequency in enumerate(frequencies):
+        is_nonpositive = signed_frequency <= 0.0
+        if is_nonpositive and imaginary_mode_policy == 'exclude':
+            excluded_modes[imode] = True
+            warning_record = {
+                'type': 'excluded_nonpositive_normal_mode',
+                'mode': int(imode),
+                'frequency_au': float(signed_frequency),
+                'frequency_cm1': float(freq_mode[imode]),
+                'imaginary_mode_policy': imaginary_mode_policy,
+            }
+            message = (
+                f"Normal mode {imode} has non-positive frequency "
+                f"{freq_mode[imode]:.2f} cm^-1 and was excluded from vibrational sampling; "
+                "its normal coordinate and momentum were set to zero."
+            )
+            warnings.warn(message, RuntimeWarning, stacklevel=2)
+            print(f"WARNING: {message}")
+            if metadata_records is not None:
+                metadata_records.append(warning_record)
+            energy.append(0.0)
+            requested_energy.append(0.0)
+            nvib.append(np.nan)
+            requested_nvib.append(np.nan)
+            print(f"{imode:<5d}  {freq_mode[imode]:>10.2f}  excluded")
+            continue
+        if signed_frequency == 0.0:
+            raise ValueError(
+                f"Normal mode {imode} has zero frequency; use imaginary_mode_policy='exclude' "
+                "or remove non-vibrational modes before sampling."
+            )
+        omega = abs(signed_frequency)
+        if signed_frequency < 0.0:
+            message = (
+                f"Normal mode {imode} has imaginary frequency {freq_mode[imode]:.2f} cm^-1; "
+                "legacy imaginary_mode_policy='abs' is sampling it as a positive harmonic mode."
+            )
+            warnings.warn(message, RuntimeWarning, stacklevel=2)
+            print(f"WARNING: {message}")
+            if metadata_records is not None:
+                metadata_records.append({
+                    'type': 'absolute_value_imaginary_normal_mode',
+                    'mode': int(imode),
+                    'frequency_au': float(signed_frequency),
+                    'frequency_cm1': float(freq_mode[imode]),
+                    'imaginary_mode_policy': imaginary_mode_policy,
+                })
 
         freq = vib_modes[imode][0] 
         sampling_mode = vib_modes[imode][1] # it must be 'Q', 'E', 'T', or 'R' 
@@ -282,29 +339,58 @@ def polyatom_vibration_sampling(mass, atoms, q_eq, ww, L, vib_modes, **kwargs):
         if sampling_mode == 'Q':
             nv = excitation 
             nvib += [nv]
-            energy += [ww[imode]*(nv + 0.5)]
+            energy += [omega*(nv + 0.5)]
         elif sampling_mode == 'T':
             RT = R_GAS_HARTREE_PER_K * excitation
-            #Truhlar like rounding/correction of too low frequencies
-            mode_freq = (freq_cutoff * CM1_TO_AU_ANGULAR_FREQUENCY) if freq_mode[imode] < freq_cutoff else ww[imode]
+            legacy_cutoff_requested = (
+                thermal_frequency_cutoff_cm1 > 0.0
+                and abs(freq_mode[imode]) < thermal_frequency_cutoff_cm1
+            )
+            # Canonical harmonic sampling must use the physical frequency in
+            # both the Boltzmann population and the Cartesian mode energy.
+            # Retain the old keyword for input compatibility, but never let it
+            # distort the ensemble.
+            mode_freq = omega
+            if metadata_records is not None:
+                metadata_records.append({
+                    'type': 'thermal_vibrational_mode',
+                    'mode': int(imode),
+                    'physical_frequency_au': float(omega),
+                    'physical_frequency_cm1': float(abs(freq_mode[imode])),
+                    'effective_sampling_frequency_au': float(mode_freq),
+                    'effective_sampling_frequency_cm1': float(
+                        mode_freq * AU_ANGULAR_FREQUENCY_TO_CM1
+                    ),
+                    'thermal_frequency_cutoff_cm1': thermal_frequency_cutoff_cm1,
+                    'cutoff_applied': False,
+                    'legacy_cutoff_ignored': bool(legacy_cutoff_requested),
+                })
+            if legacy_cutoff_requested:
+                message = (
+                    f"The legacy {thermal_frequency_cutoff_cm1:.2f} cm^-1 thermal-frequency "
+                    f"cutoff was ignored for mode {imode}; canonical sampling uses its "
+                    f"physical frequency {abs(freq_mode[imode]):.2f} cm^-1."
+                )
+                warnings.warn(message, RuntimeWarning, stacklevel=2)
+                print(f"WARNING: {message}")
             nv = thermal_vibr_mode(RT, mode_freq)
             nvib += [nv]
-            energy += [ww[imode]*(nv + 0.5)]
+            energy += [omega*(nv + 0.5)]
         elif sampling_mode == 'E':
             energy += [excitation]
-            nv = excitation/ww[imode] - 0.5 #non-integer quantum number
+            nv = excitation/omega - 0.5 #non-integer quantum number
             nvib += [nv]
         elif sampling_mode == 'W':
             if excitation not in (None, 0, 0.0):
                 raise ValueError("Wigner sampling currently supports only the vibrational ground state")
-            q_norm[imode], v_norm[imode], sampled_energy, nv = sample_wigner_ground_mode(ww[imode])
+            q_norm[imode], v_norm[imode], sampled_energy, nv = sample_wigner_ground_mode(omega)
             energy += [sampled_energy]
             nvib += [nv]
         else:
             raise ValueError("sampling_mode must be 'Q', 'E', 'T', or 'W'") 
 
         if sampling_mode == 'W':
-            requested_energy += [0.5 * ww[imode]]
+            requested_energy += [0.5 * omega]
             requested_nvib += [0]
         else:
             requested_energy += [energy[-1]]
@@ -315,7 +401,7 @@ def polyatom_vibration_sampling(mass, atoms, q_eq, ww, L, vib_modes, **kwargs):
     #------------------------------------------------------------------------------------------
 
     Evib = sum(np.array(energy))
-    Ezero = 0.5*sum(np.array(ww))
+    Ezero = 0.5 * float(np.sum(np.abs(frequencies[~excluded_modes])))
 
     print(f"\n{'traj index:':15} {traj_index} {'     Ezero':15} {'      Evib':15} {'      Eexc':15}")
     print(f"{'kcal/mol -->':15} {Ezero*HARTREE_TO_KCAL_MOL:15.3f} {Evib*HARTREE_TO_KCAL_MOL:15.3f} {(Evib-Ezero)*HARTREE_TO_KCAL_MOL:15.3f}")
@@ -334,8 +420,8 @@ def polyatom_vibration_sampling(mass, atoms, q_eq, ww, L, vib_modes, **kwargs):
     #energy to amolitude
     #Amplitude of normal modes for the original fixed-energy QCT modes.
     ampl = [
-        0.0 if vib_modes[i][1] == 'W' else math.sqrt(2.0 * energy[i]) / ww[i]
-        for i in range(len(ww))
+        0.0 if excluded_modes[i] or vib_modes[i][1] == 'W' else math.sqrt(2.0 * energy[i]) / abs(frequencies[i])
+        for i in range(len(frequencies))
     ]
 
 
@@ -344,11 +430,11 @@ def polyatom_vibration_sampling(mass, atoms, q_eq, ww, L, vib_modes, **kwargs):
         raise NotImplementedError(f"phase_sampling='{phase_sampling}' is not implemented in polyatom_vibration_sampling()")
 
     for i in range(len(ampl)):
-        if vib_modes[i][1] == 'W':
+        if excluded_modes[i] or vib_modes[i][1] == 'W':
             continue
         phase = random.uniform(0, 2 * math.pi)
         q_norm[i] = ampl[i] * math.cos(phase)
-        v_norm[i] = -ampl[i] * ww[i] * math.sin(phase)
+        v_norm[i] = -ampl[i] * abs(frequencies[i]) * math.sin(phase)
 
     #Normal mode to Cartesian transformation:
     q_cart_vib = np.transpose(q_eq) + np.matmul(L, np.transpose(np.array(q_norm)))
@@ -361,7 +447,7 @@ def polyatom_vibration_sampling(mass, atoms, q_eq, ww, L, vib_modes, **kwargs):
         project_sampled_mode_energies(
             mass,
             q_eq,
-            ww,
+            frequencies,
             L,
             q,
             p,

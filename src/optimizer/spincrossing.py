@@ -106,7 +106,9 @@ def _state_qcinput(qcinput, multiplicity, label):
     state.pop("spinmult1", None)
     state.pop("spinmult2", None)
     state.pop("spinmulti2", None)
+    state.pop("_last_energy_cache", None)
     state.pop("_qchem_validated", None)
+    state.pop("_unknown_qchem_keys", None)
     scratch_dir = state.get("scratch_dir")
     if scratch_dir:
         state["scratch_dir"] = f"{scratch_dir}_{label}_mult{int(multiplicity)}"
@@ -152,6 +154,9 @@ def _bb_step(eq, x_1, x_2, g_1, g_2):
         alpha = float(np.dot(dx, dx)) / xg if abs(xg) > 1.0e-16 else 0.7
     else:
         raise ValueError("BB step equation must be 1 or 2")
+    if not np.isfinite(alpha) or alpha <= 0.0:
+        alpha = 0.7
+    alpha = min(float(alpha), 10.0)
     return -alpha * g_2
 
 
@@ -329,19 +334,29 @@ def _line_search_internal(
         trial_energy_a = _energy(qcinput_a, trial_q, atoms)
         trial_energy_b = _energy(qcinput_b, trial_q, atoms)
         if abs(trial_energy_a - trial_energy_b) <= current_gap:
-            return trial_q, scale * dq, trial_q - q, scale
+            return trial_q, scale * dq, trial_q - q, scale, True
         scale *= 0.5
+    return np.asarray(q, dtype=float).copy(), np.zeros_like(dq), np.zeros_like(q), 0.0, False
 
-    trial_q = best_fit_dq_to_cart(
-        q,
-        qs,
-        scale * dq,
-        ic,
-        bpg,
-        n_iter=best_fit_iters,
-        rms_tol=best_fit_rms_tol,
-    )
-    return trial_q, scale * dq, trial_q - q, scale
+
+def _line_search_cartesian(
+    qcinput_a, qcinput_b, atoms, q, energy_a, energy_b, step, *, min_scale=1.0e-4
+):
+    """Backtrack a spin-crossing step until the energy gap is reduced."""
+    current_gap = abs(float(energy_a - energy_b))
+    scale = 1.0
+    while scale >= min_scale:
+        trial_q = np.asarray(q, dtype=float) + scale * np.asarray(step, dtype=float)
+        trial_energy_a = _energy(qcinput_a, trial_q, atoms)
+        trial_energy_b = _energy(qcinput_b, trial_q, atoms)
+        if (
+            np.isfinite(trial_energy_a)
+            and np.isfinite(trial_energy_b)
+            and abs(trial_energy_a - trial_energy_b) <= current_gap
+        ):
+            return trial_q, scale * step, True
+        scale *= 0.5
+    return np.asarray(q, dtype=float).copy(), np.zeros_like(step), False
 
 
 def _converged(energy_gap, step, effective_gradient, *, energy_tol, max_step, rms_step, max_gradient, rms_gradient):
@@ -645,7 +660,7 @@ def optimize_spin_crossing(
                 opt_norm = float(np.linalg.norm(opt_step))
                 if opt_norm > max_step_internal and opt_norm > 0.0:
                     opt_step *= float(max_step_internal) / opt_norm
-                x_3, accepted_opt_step, step, _scale = _line_search_internal(
+                x_3, accepted_opt_step, step, _scale, accepted = _line_search_internal(
                     qcinput_a,
                     qcinput_b,
                     atoms,
@@ -666,64 +681,85 @@ def optimize_spin_crossing(
                     step, inv_hess, _updated = _quasi_newton_step(method_label, x_1, x_2, geff_1, geff_2, inv_hess)
                 if step_limit:
                     step = _step_limit(step, max_component=step_max_component)
-                x_3 = x_2 + step
+                x_3, step, accepted = _line_search_cartesian(
+                    qcinput_a, qcinput_b, atoms, x_2, energy_a, energy_b, step
+                )
+
+            if not accepted:
+                message = "Spin-crossing line search failed to reduce the state-energy gap"
+                if print_report:
+                    _print_optimization_status(False, message)
+                return SpinCrossingResult(
+                    atoms=atoms, q=x_2, energy_a=energy_a, energy_b=energy_b,
+                    converged=False, nsteps=istep - 1, method=method_label,
+                    multiplicities=(mult_a, mult_b), trajectory_file=trajectory_file,
+                    gradient_a=grad_a, gradient_b=grad_b, effective_gradient=geff_2,
+                    points=points, message=message, coordinates=coordinates,
+                    use_redundant_internals=bool(use_redundant_internals),
+                )
+
+            # Convergence, reporting, and trajectory records must all describe
+            # the same accepted geometry, not the geometry before its step.
+            trial_energy_a = _energy(qcinput_a, x_3, atoms)
+            trial_energy_b = _energy(qcinput_b, x_3, atoms)
+            trial_grad_a = _gradient(qcinput_a, x_3, atoms)
+            trial_grad_b = _gradient(qcinput_b, x_3, atoms)
+            trial_parallel, trial_perpendicular, trial_geff = _effective_gradient(
+                trial_energy_a,
+                trial_energy_b,
+                trial_grad_a,
+                trial_grad_b,
+                fac_parallel=fac_parallel,
+                fac_perpendicular=fac_perpendicular,
+            )
 
             if print_report:
-                _print_step(istep, energy_a, energy_b, step, geff_2)
+                _print_step(istep, trial_energy_a, trial_energy_b, step, trial_geff)
             if traj_handle is not None:
-                _write_opt_frame(traj_handle, atoms, x_3, istep, 0.5 * (energy_a + energy_b), geff_2)
+                _write_opt_frame(
+                    traj_handle, atoms, x_3, istep,
+                    0.5 * (trial_energy_a + trial_energy_b), trial_geff,
+                )
 
             point = SpinCrossingPoint(
                 step=istep,
-                q=x_2.copy(),
-                energy_a=energy_a,
-                energy_b=energy_b,
-                gradient_a=grad_a.copy(),
-                gradient_b=grad_b.copy(),
-                effective_gradient=geff_2.copy(),
-                parallel_gradient=parallel.copy(),
-                perpendicular_gradient=perpendicular.copy(),
+                q=x_3.copy(),
+                energy_a=trial_energy_a,
+                energy_b=trial_energy_b,
+                gradient_a=trial_grad_a.copy(),
+                gradient_b=trial_grad_b.copy(),
+                effective_gradient=trial_geff.copy(),
+                parallel_gradient=trial_parallel.copy(),
+                perpendicular_gradient=trial_perpendicular.copy(),
                 step_vector=step.copy(),
             )
             points.append(point)
 
             if _converged(
-                energy_a - energy_b,
+                trial_energy_a - trial_energy_b,
                 step,
-                geff_2,
+                trial_geff,
                 energy_tol=energy_tol,
                 max_step=max_step,
                 rms_step=rms_step,
                 max_gradient=max_gradient,
                 rms_gradient=rms_gradient,
             ):
-                final_energy_a = _energy(qcinput_a, x_3, atoms)
-                final_energy_b = _energy(qcinput_b, x_3, atoms)
-                final_grad_a = _gradient(qcinput_a, x_3, atoms)
-                final_grad_b = _gradient(qcinput_b, x_3, atoms)
-                _final_parallel, _final_perpendicular, final_geff = _effective_gradient(
-                    final_energy_a,
-                    final_energy_b,
-                    final_grad_a,
-                    final_grad_b,
-                    fac_parallel=fac_parallel,
-                    fac_perpendicular=fac_perpendicular,
-                )
                 if print_report:
                     _print_optimization_status(True, "Spin-crossing convergence reached.")
                 return SpinCrossingResult(
                     atoms=atoms,
                     q=x_3,
-                    energy_a=final_energy_a,
-                    energy_b=final_energy_b,
+                    energy_a=trial_energy_a,
+                    energy_b=trial_energy_b,
                     converged=True,
                     nsteps=istep,
                     method=method_label,
                     multiplicities=(mult_a, mult_b),
                     trajectory_file=trajectory_file,
-                    gradient_a=final_grad_a,
-                    gradient_b=final_grad_b,
-                    effective_gradient=final_geff,
+                    gradient_a=trial_grad_a,
+                    gradient_b=trial_grad_b,
+                    effective_gradient=trial_geff,
                     points=points,
                     message="Spin-crossing convergence reached.",
                     coordinates=coordinates,

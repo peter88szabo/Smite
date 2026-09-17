@@ -307,6 +307,16 @@ def _write_initial_conditions_summary(system, context):
             handle.write(f"Ecoll[Eh] {system.Ecoll:.12f}\n")
         if hasattr(system, "tempcoll") and system.tempcoll is not None:
             handle.write(f"collision_temperature[K] {system.tempcoll:.6f}\n")
+        sampling_metadata = getattr(system, "sampling_metadata", None)
+        sampling_warnings = getattr(system, "sampling_warnings", None)
+        sampling_records = list(sampling_metadata or [])
+        if sampling_warnings is not sampling_metadata:
+            sampling_records.extend(sampling_warnings or [])
+        for record in sampling_records:
+            prefix = "sampling_warning" if str(record.get("type", "")).startswith((
+                "excluded_", "absolute_value_"
+            )) else "sampling_metadata"
+            handle.write(f"{prefix} {json.dumps(record, sort_keys=True)}\n")
 
         atoms = getattr(system, "atoms", None)
         q = getattr(system, "q", None)

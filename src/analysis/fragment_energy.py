@@ -111,6 +111,7 @@ def fragment_energy_partition(
     mass_vec = np.asarray(mass, dtype=float)[indices]
 
     q_internal, p_internal, com, vcom = remove_center_of_mass_motion(q_xyz, p_xyz, mass_vec)
+    translational_kinetic = 0.5 * float(np.sum(mass_vec)) * float(np.dot(vcom, vcom))
     internal_kinetic = kinetic_energy(p_internal, mass_vec)
     fragment_angmom = np.asarray(
         angular_momentum(q_internal.reshape(-1), p_internal.reshape(-1)), dtype=float
@@ -162,6 +163,7 @@ def fragment_energy_partition(
         "indices": fragment["indices"],
         "center_of_mass": com,
         "center_of_mass_velocity": vcom,
+        "translational_kinetic_energy": translational_kinetic,
         "internal_kinetic_energy": internal_kinetic,
         "potential_energy": potential_energy,
         "reference_potential_energy": reference_potential_energy,
@@ -252,6 +254,9 @@ def _qchem_for_state(base_qchem, state):
     if not isinstance(base_qchem, dict):
         raise ValueError("A collision qchem input is required for fragment-energy evaluation")
     qchem = copy.deepcopy(base_qchem)
+    qchem.pop("_last_energy_cache", None)
+    qchem.pop("_qchem_validated", None)
+    qchem.pop("_unknown_qchem_keys", None)
     overrides = state.get("qchem_overrides", {})
     if overrides:
         if not isinstance(overrides, dict):

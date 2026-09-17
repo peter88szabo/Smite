@@ -40,6 +40,24 @@ from utils.constants import ANGSTROM_TO_BOHR, AU_ANGULAR_FREQUENCY_TO_CM1, BOHR_
 from utils.format_and_print import makeXYZ
 
 
+def _backtrack_constrained_trial(q, energy, step, project, evaluate, *, min_scale=1.0e-4):
+    """Accept only a non-increasing constrained-relaxation step.
+
+    ``project`` reapplies the scan constraint after every trial, so shrinking
+    the free-coordinate displacement cannot accidentally release the target.
+    """
+    scale = 1.0
+    q = np.asarray(q, dtype=float)
+    step = np.asarray(step, dtype=float)
+    while scale >= min_scale:
+        trial_q = project(q + scale * step)
+        trial_energy = float(evaluate(trial_q))
+        if np.isfinite(trial_energy) and trial_energy <= float(energy):
+            return trial_q, trial_energy, scale, True
+        scale *= 0.5
+    return q.copy(), float(energy), 0.0, False
+
+
 @dataclass
 class ScanPoint:
     index: int
@@ -714,9 +732,17 @@ def _relax_normal_mode_scan_point(
         step_y = step_y - np.dot(mode_mw, step_y) * mode_mw
         step_y = step_limit(step_y, max_component=max_step)
 
-        trial_q = q + step_y / sqrt_m
-        trial_q = _set_normal_mode_coordinate(q_ref, trial_q, mode_cart, mode_mw, sqrt_m, target, unit)
-        trial_energy = _energy(qcinput, trial_q, atoms)
+        trial_q, trial_energy, _scale, accepted = _backtrack_constrained_trial(
+            q,
+            energy,
+            step_y / sqrt_m,
+            lambda candidate: _set_normal_mode_coordinate(
+                q_ref, candidate, mode_cart, mode_mw, sqrt_m, target, unit
+            ),
+            lambda candidate: _energy(qcinput, candidate, atoms),
+        )
+        if not accepted:
+            return q, energy, grad_x, False, iteration - 1, "Normal-mode constrained scan line search failed."
         trial_grad_x = _gradient(qcinput, trial_q, atoms)
         trial_grad_y = trial_grad_x / sqrt_m
         trial_grad_y = trial_grad_y - np.dot(mode_mw, trial_grad_y) * mode_mw
@@ -962,19 +988,25 @@ def _relax_scan_point_mixed(
         for axis in normal_axes:
             step_y = step_y - np.dot(axis["mode_mw"], step_y) * axis["mode_mw"]
         step_y = step_limit(step_y, max_component=max_step)
-        trial_q = q + step_y / sqrt_m
-        trial_q = _apply_mixed_scan_targets(
-            trial_q,
-            q_ref,
-            ic,
-            axes,
-            targets,
-            sqrt_m,
-            best_fit_iters=best_fit_iters,
-            best_fit_rms_tol=best_fit_rms_tol,
-            use_redundant_internals=use_redundant_internals,
+        trial_q, trial_energy, _scale, accepted = _backtrack_constrained_trial(
+            q,
+            energy,
+            step_y / sqrt_m,
+            lambda candidate: _apply_mixed_scan_targets(
+                candidate,
+                q_ref,
+                ic,
+                axes,
+                targets,
+                sqrt_m,
+                best_fit_iters=best_fit_iters,
+                best_fit_rms_tol=best_fit_rms_tol,
+                use_redundant_internals=use_redundant_internals,
+            ),
+            lambda candidate: _energy(qcinput, candidate, atoms),
         )
-        trial_energy = _energy(qcinput, trial_q, atoms)
+        if not accepted:
+            return q, energy, grad_x, False, iteration - 1, "Mixed constrained scan line search failed."
         trial_grad_x = _gradient(qcinput, trial_q, atoms)
         trial_grad_y = trial_grad_x / sqrt_m
         for axis in normal_axes:
@@ -1207,16 +1239,27 @@ def _relax_scan_point_multi(
         for coord_index, target, mode in zip(coord_indices, targets, modes):
             dq[coord_index] = _target_delta(mode, target, qs[coord_index])
 
-        trial_q = best_fit_dq_to_cart(
-            q,
-            qs,
-            dq,
-            ic,
-            bpg,
-            n_iter=best_fit_iters,
-            rms_tol=best_fit_rms_tol,
-        )
-        trial_energy = _energy(qcinput, trial_q, atoms)
+        scale = 1.0
+        accepted = False
+        while scale >= 1.0e-4:
+            trial_dq = dq.copy()
+            trial_dq[free] = scale * dq_free
+            trial_q = best_fit_dq_to_cart(
+                q,
+                qs,
+                trial_dq,
+                ic,
+                bpg,
+                n_iter=best_fit_iters,
+                rms_tol=best_fit_rms_tol,
+            )
+            trial_energy = _energy(qcinput, trial_q, atoms)
+            if np.isfinite(trial_energy) and trial_energy <= energy:
+                accepted = True
+                break
+            scale *= 0.5
+        if not accepted:
+            return q, energy, grad_x, False, iteration - 1, "Constrained scan line search failed."
         trial_grad_x = _gradient(qcinput, trial_q, atoms)
         trial_bpg, _trial_redundant_system = _scan_bpg(
             trial_q,

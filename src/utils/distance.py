@@ -1,6 +1,73 @@
 import numpy as np
 from utils.constants import ANGSTROM_TO_BOHR
 
+
+class ReactionChannelHysteresis:
+    """Confirm a pair-condition reaction channel only after persistence.
+
+    A candidate channel must be detected on ``required_steps`` consecutive
+    trajectory frames.  A missing match or a different channel resets the
+    previous candidate, preventing a transient threshold crossing from being
+    assigned as a product channel.
+    """
+
+    def __init__(self, required_steps=1):
+        if isinstance(required_steps, (bool, np.bool_)):
+            raise ValueError("reaction_persistence_steps must be a positive integer")
+        try:
+            required_steps_int = int(required_steps)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("reaction_persistence_steps must be a positive integer") from exc
+        if required_steps_int != required_steps or required_steps_int < 1:
+            raise ValueError("reaction_persistence_steps must be a positive integer")
+        self.required_steps = required_steps_int
+        self.candidate_channel = None
+        self.consecutive_steps = 0
+
+    def reset(self):
+        self.candidate_channel = None
+        self.consecutive_steps = 0
+
+    def update(self, q, pairs_to_test):
+        """Evaluate the raw channel condition and return its confirmed state."""
+        matched, channel = test_to_stop_specific(q, pairs_to_test)
+        if not matched:
+            self.reset()
+            return False, "default"
+
+        if channel == self.candidate_channel:
+            self.consecutive_steps += 1
+        else:
+            self.candidate_channel = channel
+            self.consecutive_steps = 1
+
+        if self.consecutive_steps >= self.required_steps:
+            return True, channel
+        return False, "default"
+
+    def restart_state(self):
+        return {
+            "required_steps": self.required_steps,
+            "candidate_channel": self.candidate_channel,
+            "consecutive_steps": self.consecutive_steps,
+        }
+
+    def restore_restart_state(self, state):
+        if int(state.get("required_steps", -1)) != self.required_steps:
+            raise ValueError(
+                "Restart reaction_persistence_steps does not match the checkpoint"
+            )
+        consecutive_steps = int(state.get("consecutive_steps", 0))
+        if consecutive_steps < 0 or consecutive_steps >= self.required_steps:
+            raise ValueError("Restart reaction hysteresis state is invalid")
+        candidate_channel = state.get("candidate_channel")
+        if consecutive_steps == 0:
+            candidate_channel = None
+        elif candidate_channel is None:
+            raise ValueError("Restart reaction hysteresis state is incomplete")
+        self.candidate_channel = candidate_channel
+        self.consecutive_steps = consecutive_steps
+
 def distance_matrix(q):
     N = len(q) // 3
     coordinates = np.reshape(q, (N, 3))

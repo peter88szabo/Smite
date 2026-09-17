@@ -4,6 +4,7 @@ import math
 import shutil
 import random
 import json
+import hashlib
 
 from utils.cenmass                import cenmass
 from utils.euler                  import euler_rot          
@@ -20,6 +21,7 @@ from utils.constants              import HARTREE_TO_KJMOL
 from utils.constants              import KJMOL_TO_HARTREE, R_GAS_HARTREE_PER_K
 from utils.distance               import test_to_stop_general
 from utils.distance               import test_to_stop_specific
+from utils.distance               import ReactionChannelHysteresis
 
 from normalmode.hessian           import getHessian
 from normalmode.eckart            import eckart_transform
@@ -45,6 +47,10 @@ from qchem_interfaces.qchem_validation import validate_qchem_input
 
 from thermostats.randmomentum     import random_initialize_momenta
 from analysis.spectrum            import vibrational_spectrum as compute_vibrational_spectrum
+from analysis.short_time_spectrum import (
+    analyze_molecule_short_time_channels,
+    analyze_molecule_short_time_spectrum,
+)
 from analysis.scattering          import get_scattering_form_factors as compute_scattering_form_factors
 from dynamics.integrator_driver   import apply_integrator
 from dynamics.integrator_driver   import initialize_integrator
@@ -55,6 +61,7 @@ from dynamics.thermostat_driver   import initialize_gle_state
 from dynamics.thermostat_driver   import prepare_thermostat
 from dynamics.wavefunction        import prepare_wavefunction_directory
 from dynamics.wavefunction        import wavefunction_file
+from dynamics.constraints         import RigidConstraintSolver
 
 
 class Molecule:
@@ -74,6 +81,8 @@ class Molecule:
                 raise ValueError("Lengths of inputs are not consistent.")  
 
         self.nfix       = nfix #fix number of degree of freedom 
+        self.remove_com = bool(int(nfix) >= 3)
+        self._nfix_includes_com = self.remove_com
         self.atoms      = atoms
         self.natom      = len(atoms)
         self.q_ini      = np.array(q_ini)  
@@ -88,6 +97,10 @@ class Molecule:
         self.last_step  = last_step
         self.Rstop      = None 
         self.pairstop   = None
+        self._reaction_channel_hysteresis = None
+        self.reaction_channel_candidate = None
+        self.reaction_channel_persistence = 0
+        self.reaction_persistence_steps = 1
         self.fname      = None
         self.vref       = 0.0  #the equilibrium pot energy of fragment 
         self.vini       = None #the initial (sampled) pot energy which is likely out of equilibrium
@@ -97,6 +110,207 @@ class Molecule:
         self.tsave      = []
         self._nosehoover_state = None
         self._gle_state = None
+        self._rigid_constraint_groups = []
+        self._rigid_constraint_signature_cache = None
+        self._constraint_solver = None
+        self._constraint_algorithm = "rattle"
+        self._constraint_position_tolerance = 1.0e-10
+        self._constraint_velocity_tolerance = 1.0e-10
+        self._constraint_max_iterations = 200
+
+
+    @property
+    def has_rigid_constraints(self):
+        return bool(self._rigid_constraint_groups)
+
+    def add_rigid_constraint_group(
+        self,
+        atom_indices,
+        reference_q=None,
+        degrees_of_freedom_removed=None,
+    ):
+        """Register one independently rigid set of atoms.
+
+        Atom indices refer to this molecule's global atom ordering.  The
+        reference geometry supplies the distances retained by SHAKE/RATTLE.
+        """
+        indices = np.asarray(atom_indices, dtype=int)
+        if indices.ndim != 1 or len(indices) < 2:
+            raise ValueError("A rigid constraint group must contain at least two atoms")
+        if len(np.unique(indices)) != len(indices):
+            raise ValueError("Rigid constraint group atom indices must be unique")
+        if np.any(indices < 0) or np.any(indices >= self.natom):
+            raise ValueError("Rigid constraint group contains an out-of-range atom index")
+        for group in self._rigid_constraint_groups:
+            if np.intersect1d(indices, group["atom_indices"]).size:
+                raise ValueError("Rigid constraint groups may not overlap")
+
+        if reference_q is None:
+            full_reference = np.asarray(self.q, dtype=float).reshape((-1, 3))
+            reference_positions = full_reference[indices]
+        else:
+            reference = np.asarray(reference_q, dtype=float)
+            if reference.shape == (3 * self.natom,):
+                reference_positions = reference.reshape((-1, 3))[indices]
+            elif reference.shape == (len(indices), 3):
+                reference_positions = reference
+            elif reference.shape == (3 * len(indices),):
+                reference_positions = reference.reshape((-1, 3))
+            else:
+                raise ValueError(
+                    "Rigid reference coordinates must describe either the full molecule "
+                    "or exactly the selected atom group"
+                )
+
+        if np.any(~np.isfinite(reference_positions)):
+            raise ValueError("Rigid reference coordinates contain NaN or infinity")
+
+        if degrees_of_freedom_removed is None:
+            if len(indices) == 2:
+                degrees_of_freedom_removed = 1
+            else:
+                centered = reference_positions - np.mean(reference_positions, axis=0)
+                linear = np.linalg.matrix_rank(centered, tol=1.0e-10) <= 1
+                degrees_of_freedom_removed = 3 * len(indices) - (5 if linear else 6)
+
+        degrees_of_freedom_removed = int(degrees_of_freedom_removed)
+        if degrees_of_freedom_removed < 1:
+            raise ValueError("A rigid group must remove at least one degree of freedom")
+        maximum_removed = 1 if len(indices) == 2 else 3 * len(indices) - 5
+        if degrees_of_freedom_removed > maximum_removed:
+            raise ValueError("Rigid-group degrees of freedom exceed the physical maximum")
+
+        self._rigid_constraint_groups.append(
+            {
+                "atom_indices": np.array(indices, copy=True),
+                "reference_positions": np.array(reference_positions, copy=True),
+                "degrees_of_freedom_removed": degrees_of_freedom_removed,
+            }
+        )
+        self._constraint_solver = None
+        self._rigid_constraint_signature_cache = None
+
+    def rigid_constraint_signature(self):
+        """Return a stable fingerprint of rigid-group topology and distances."""
+        if self._rigid_constraint_signature_cache is not None:
+            return self._rigid_constraint_signature_cache
+        digest = hashlib.sha256()
+        for group in self._rigid_constraint_groups:
+            indices = np.asarray(group["atom_indices"], dtype=int)
+            reference = np.asarray(group["reference_positions"], dtype=float)
+            header = {
+                "atom_indices": indices.tolist(),
+                "degrees_of_freedom_removed": int(
+                    group["degrees_of_freedom_removed"]
+                ),
+            }
+            digest.update(
+                json.dumps(header, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            )
+            for local_i in range(len(indices)):
+                for local_j in range(local_i + 1, len(indices)):
+                    displacement = reference[local_i] - reference[local_j]
+                    distance_hex = float(np.dot(displacement, displacement)).hex()
+                    digest.update(distance_hex.encode("ascii"))
+                    digest.update(b";")
+        self._rigid_constraint_signature_cache = digest.hexdigest()
+        return self._rigid_constraint_signature_cache
+
+    def copy_rigid_constraint_groups_from(self, other, atom_offset=0):
+        """Copy rigid groups from a fragment into a combined molecule."""
+        atom_offset = int(atom_offset)
+        for group in getattr(other, "_rigid_constraint_groups", ()):
+            self.add_rigid_constraint_group(
+                np.asarray(group["atom_indices"], dtype=int) + atom_offset,
+                reference_q=np.asarray(group["reference_positions"], dtype=float),
+                degrees_of_freedom_removed=group["degrees_of_freedom_removed"],
+            )
+
+    def prepare_rigid_constraints(
+        self,
+        algorithm="rattle",
+        position_tolerance=1.0e-10,
+        velocity_tolerance=1.0e-10,
+        max_iterations=200,
+    ):
+        """Initialize constraint topology and project the starting state."""
+        algorithm = str(algorithm).lower()
+        if algorithm not in {"shake", "rattle"}:
+            raise ValueError("constraint_algorithm must be 'shake' or 'rattle'")
+
+        self._constraint_algorithm = algorithm
+        self._constraint_position_tolerance = float(position_tolerance)
+        self._constraint_velocity_tolerance = float(velocity_tolerance)
+        self._constraint_max_iterations = int(max_iterations)
+
+        if not self.has_rigid_constraints:
+            self._constraint_solver = None
+            return None
+
+        solver = RigidConstraintSolver.from_rigid_groups(
+            self._rigid_constraint_groups,
+            position_tolerance=self._constraint_position_tolerance,
+            velocity_tolerance=self._constraint_velocity_tolerance,
+            max_iterations=self._constraint_max_iterations,
+        )
+        if self.nfix < solver.degrees_of_freedom_removed:
+            raise ValueError(
+                "nfix is smaller than the number of degrees of freedom removed "
+                "by the registered rigid groups"
+            )
+
+        self.q = solver.project_positions(self.q, self.wmass)
+        self.p = solver.rattle(self.q, self.p, self.wmass)
+        self._constraint_solver = solver
+        return solver
+
+    def project_rigid_momenta(self):
+        """Restore the RATTLE velocity constraints after a momentum operation."""
+        if not self.has_rigid_constraints:
+            return self.p
+        if self._constraint_solver is None:
+            self.prepare_rigid_constraints(
+                algorithm=self._constraint_algorithm,
+                position_tolerance=self._constraint_position_tolerance,
+                velocity_tolerance=self._constraint_velocity_tolerance,
+                max_iterations=self._constraint_max_iterations,
+            )
+        self.p = self._constraint_solver.rattle(self.q, self.p, self.wmass)
+        return self.p
+
+    def thermostat_removed_dof(self):
+        """Return the statistical DOF count removed from thermostatting."""
+        removed = int(self.nfix)
+        if removed < 0:
+            raise ValueError("nfix must be non-negative")
+        if self.remove_com and not self._nfix_includes_com:
+            removed += min(3, len(self.p))
+        if removed >= len(self.p):
+            raise ValueError(
+                "The number of removed degrees of freedom must be smaller than 3N"
+            )
+        return removed
+
+    def project_center_of_mass_momentum(self):
+        """Project momenta onto the zero-total-momentum subspace."""
+        if not self.remove_com:
+            return self.p
+        momentum = np.asarray(self.p, dtype=float).reshape((-1, 3))
+        masses = np.asarray(self.mass, dtype=float)
+        total_mass = float(np.sum(masses))
+        if total_mass <= 0.0 or not np.isfinite(total_mass):
+            raise ValueError("Center-of-mass projection requires positive finite masses")
+        com_velocity = np.sum(momentum, axis=0) / total_mass
+        momentum -= masses[:, None] * com_velocity[None, :]
+        self.p = momentum.ravel()
+        return self.p
+
+    def non_com_removed_dof(self):
+        """Return removed DOFs other than an explicitly counted COM triplet."""
+        removed = int(self.nfix)
+        if self._nfix_includes_com:
+            removed -= min(3, len(self.p))
+        return max(0, removed)
 
 
     def save_velocity_and_distance_matrix(self, time_fs=None):
@@ -123,6 +337,27 @@ class Molecule:
 
     def vibrational_spectrum(self, dt, print_maxfreq=5000.0):
         return compute_vibrational_spectrum(self, dt, print_maxfreq=print_maxfreq)
+
+    def short_time_vibrational_spectrum(self, dt=None, **kwargs):
+        """Analyze histories collected with spectrum=True using STFT."""
+        return analyze_molecule_short_time_spectrum(
+            self,
+            dt_fs=dt,
+            **kwargs,
+        )
+
+    def short_time_vibrational_channels(self, channels, dt=None, **kwargs):
+        """Analyze several fixed atom channels with dynamic fragment tracking."""
+        return analyze_molecule_short_time_channels(
+            self,
+            channels=channels,
+            dt_fs=dt,
+            **kwargs,
+        )
+
+    def time_resolved_vibrational_spectrum(self, dt=None, **kwargs):
+        """Alias for short_time_vibrational_spectrum."""
+        return self.short_time_vibrational_spectrum(dt=dt, **kwargs)
 
     def get_scattering_form_factors(self, dt, qmin=0.0, qmax=8.0, nq=600, dpi=600):
         return compute_scattering_form_factors(self, dt, qmin=qmin, qmax=qmax, nq=nq, dpi=dpi)
@@ -247,6 +482,20 @@ class Molecule:
                 "save_force": propagator.save_force.tolist(),
             }
 
+        if self.has_rigid_constraints:
+            constrained_dof = sum(
+                int(group["degrees_of_freedom_removed"])
+                for group in self._rigid_constraint_groups
+            )
+            state["constraints"] = {
+                "algorithm": self._constraint_algorithm,
+                "position_tolerance": self._constraint_position_tolerance,
+                "velocity_tolerance": self._constraint_velocity_tolerance,
+                "max_iterations": self._constraint_max_iterations,
+                "degrees_of_freedom_removed": constrained_dof,
+                "signature": self.rigid_constraint_signature(),
+            }
+
         if self._nosehoover_state is not None:
             state["nosehoover_xi"] = float(self._nosehoover_state.xi)
         if self._gle_state is not None:
@@ -265,6 +514,10 @@ class Molecule:
                 collision_state[name] = self._json_compatible(value)
         if collision_state:
             state["collision_state"] = collision_state
+
+        reaction_hysteresis = getattr(self, "_reaction_channel_hysteresis", None)
+        if reaction_hysteresis is not None:
+            state["reaction_hysteresis"] = reaction_hysteresis.restart_state()
 
         state_file = self._restart_state_path(backfile)
         temporary_file = state_file + ".tmp"
@@ -301,14 +554,49 @@ class Molecule:
             raise ValueError("Restart thermostat parameters do not match the checkpoint")
         if not np.isclose(float(state.get("timestep_au")), float(dt), rtol=0.0, atol=1.0e-14):
             raise ValueError("Restart timestep does not match the checkpoint")
+
+        saved_constraints = state.get("constraints")
+        if self.has_rigid_constraints and saved_constraints is None:
+            raise ValueError(
+                "Rigid restart checkpoint does not contain SHAKE/RATTLE metadata"
+            )
+        if saved_constraints is not None:
+            if not self.has_rigid_constraints:
+                raise ValueError(
+                    "Restart checkpoint contains rigid constraints but the current molecule does not"
+                )
+            if saved_constraints.get("algorithm") != self._constraint_algorithm:
+                raise ValueError("Restart constraint algorithm does not match the checkpoint")
+            constraint_values = (
+                ("position_tolerance", self._constraint_position_tolerance),
+                ("velocity_tolerance", self._constraint_velocity_tolerance),
+            )
+            for name, current_value in constraint_values:
+                if not np.isclose(
+                    float(saved_constraints.get(name)),
+                    float(current_value),
+                    rtol=0.0,
+                    atol=0.0,
+                ):
+                    raise ValueError(f"Restart constraint {name} does not match the checkpoint")
+            if int(saved_constraints.get("max_iterations", -1)) != self._constraint_max_iterations:
+                raise ValueError("Restart constraint max_iterations does not match the checkpoint")
+            if int(saved_constraints.get("degrees_of_freedom_removed", -1)) != int(
+                self._constraint_solver.degrees_of_freedom_removed
+            ):
+                raise ValueError("Restart rigid degrees of freedom do not match the checkpoint")
+            if saved_constraints.get("signature") != self.rigid_constraint_signature():
+                raise ValueError("Restart rigid constraint topology does not match the checkpoint")
+
         if thermostat == "nosehoover" and "nosehoover_xi" in state:
             from thermostats.nosehoover import NoseHoover
 
             self._nosehoover_state = NoseHoover(
-                nfix=self.nfix,
+                nfix=self.thermostat_removed_dof(),
                 wmass=self.wmass,
                 tau=float(thermo_param) * FS_TO_AU_TIME,
                 target_temp=thermo_temp,
+                scale_all=self.has_rigid_constraints,
             )
             self._nosehoover_state.xi = float(state["nosehoover_xi"])
 
@@ -340,6 +628,13 @@ class Molecule:
             if isinstance(value, list):
                 value = np.asarray(value, dtype=float)
             setattr(self, name, value)
+
+        reaction_hysteresis = getattr(self, "_reaction_channel_hysteresis", None)
+        saved_hysteresis = state.get("reaction_hysteresis")
+        if reaction_hysteresis is not None and saved_hysteresis is not None:
+            reaction_hysteresis.restore_restart_state(saved_hysteresis)
+            self.reaction_channel_candidate = reaction_hysteresis.candidate_channel
+            self.reaction_channel_persistence = reaction_hysteresis.consecutive_steps
         return float(state["initial_energy"])
 
     @staticmethod
@@ -387,8 +682,11 @@ class Molecule:
     def thermo_berendsen(self, tau, dt, Ttarg):
         self.p = apply_thermostat(self, 'berendsen', tau / FS_TO_AU_TIME, Ttarg, dt)
 
-    def thermo_andersen(self, prob, dt, Ttarg):
-        self.p = apply_thermostat(self, 'andersen', prob, Ttarg, dt)
+    def thermo_andersen(self, collision_time, dt, Ttarg):
+        """Apply Andersen collisions; ``collision_time`` and ``dt`` are in a.u."""
+        self.p = apply_thermostat(
+            self, 'andersen', collision_time / FS_TO_AU_TIME, Ttarg, dt
+        )
 
     def thermo_nosehoover(self, tau, dt, Ttarg):
         self.p = apply_thermostat(self, 'nosehoover', tau / FS_TO_AU_TIME, Ttarg, dt)
@@ -411,12 +709,17 @@ class Molecule:
                              restart=False,
                              collision=False,
                              pairs_to_stop=None,
+                             reaction_persistence_steps=1,
                              Rstop=None,
                              thermostat=None,
                              thermo_param=None,
                              thermo_temp=None,
+                             constraint_algorithm="rattle",
+                             constraint_tolerance=1.0e-10,
+                             constraint_velocity_tolerance=1.0e-10,
+                             constraint_max_iterations=200,
                              spectrum=False,
-                             post_collision_analysis=False,
+                             post_collision_analysis=True,
                              post_collision_analysis_file=None,
                              post_collision_bond_th_HX=1.5,
                              post_collision_bond_th_XX=2.0,
@@ -437,10 +740,23 @@ class Molecule:
 
         if pairs_to_stop is not None and Rstop is None:
             self.pairstop = pairs_to_stop
+            self._reaction_channel_hysteresis = ReactionChannelHysteresis(
+                reaction_persistence_steps
+            )
+            self.reaction_persistence_steps = self._reaction_channel_hysteresis.required_steps
+            self.reaction_channel_candidate = None
+            self.reaction_channel_persistence = 0
         elif pairs_to_stop is None and Rstop is not None:
             self.Rstop = Rstop * ANGSTROM_TO_BOHR #reactive event condition for trajectory 
+            self._reaction_channel_hysteresis = None
         else:
             raise ValueError("\nEither Rstop or pairs_to_stop must be given in the input")
+
+        if self.has_rigid_constraints and integrator not in {"verlet", "leapfrog"}:
+            raise ValueError(
+                "Rigid SHAKE/RATTLE propagation currently supports only the "
+                "verlet and leapfrog integrators"
+            )
 
         self._set_trajectory_scratch_dir(traj_file, restart=restart)
 
@@ -464,6 +780,12 @@ class Molecule:
 
 
         dt = timestep * FS_TO_AU_TIME
+        self.prepare_rigid_constraints(
+            algorithm=constraint_algorithm,
+            position_tolerance=constraint_tolerance,
+            velocity_tolerance=constraint_velocity_tolerance,
+            max_iterations=constraint_max_iterations,
+        )
         prepare_thermostat(self, thermostat, thermo_param, thermo_temp, dt, restart=restart)
         restart_initial_energy = self._restore_restart_state(
             restart_state, thermostat, thermo_param, thermo_temp, dt
@@ -501,7 +823,15 @@ class Molecule:
                     Rcom_min = min(Rcom_min, Rcom_actual)
 
                 if self.pairstop is not None and self.Rstop is None:
-                    tstop, channel = test_to_stop_specific(q=self.q, pairs_to_test=self.pairstop)
+                    tstop, channel = self._reaction_channel_hysteresis.update(
+                        q=self.q, pairs_to_test=self.pairstop
+                    )
+                    self.reaction_channel_candidate = (
+                        self._reaction_channel_hysteresis.candidate_channel
+                    )
+                    self.reaction_channel_persistence = (
+                        self._reaction_channel_hysteresis.consecutive_steps
+                    )
                 elif self.pairstop is None and self.Rstop is not None:
                     if collision:
                         tstop = Rcom_actual > self.Rstop
@@ -593,6 +923,8 @@ class Molecule:
                                 equilibrium_geometries=post_collision_equilibrium_geometries,
                                 channel_state=channel_state,
                                 isolation_distance=post_collision_isolation_distance,
+                                trajectory_initial_energy_hartree=E0,
+                                trajectory_final_energy_hartree=E,
                             )
 
                         print("\n Reactive event found: ", formula, "    Reaction channel: ", channel)
@@ -661,7 +993,7 @@ class Molecule:
        #kinetic energy of the system
         Ekin=sum(self.p*self.p/self.wmass)*0.5
 
-        ndof = len(self.p) - self.nfix
+        ndof = len(self.p) - self.thermostat_removed_dof()
         if ndof <= 0:
             raise ValueError("Number of active degrees of freedom must be positive in traj_temperature()")
 
@@ -679,6 +1011,15 @@ class Molecule:
         
         # Create a new instance with combined attributes
         new_fragment = Fragment(combined_atoms, combined_mass, combined_coord_eq, combined_mom)
+        new_fragment.nfix = (
+            self.non_com_removed_dof() + other_molecule.non_com_removed_dof()
+        )
+        new_fragment.remove_com = self.remove_com or other_molecule.remove_com
+        new_fragment._nfix_includes_com = False
+        new_fragment.copy_rigid_constraint_groups_from(self, atom_offset=0)
+        new_fragment.copy_rigid_constraint_groups_from(
+            other_molecule, atom_offset=self.natom
+        )
 
         return new_fragment
 

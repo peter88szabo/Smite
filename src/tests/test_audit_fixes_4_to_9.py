@@ -9,6 +9,8 @@ from core.molecule import Molecule
 from integrators.predcorr import PredCorr
 from parallel.trajectory_runner import derive_trajectory_seed, run_parallel_trajectories
 from sampling.thermal import thermal_rot_canonical_top
+from sampling.thermal import thermal_rot_quantum_spherical_top
+from sampling.rel_init_coords import setRelativeInitCoords
 from utils.clustering import cluster_chemical_formulas
 from utils.constants import ANGSTROM_TO_BOHR, FS_TO_AU_TIME, HARTREE_TO_CM1
 from utils.distance import test_to_stop_specific as reaction_stop_specific
@@ -50,6 +52,44 @@ def test_canonical_linear_top_skips_zero_moment_axis():
 
     assert np.all(samples[:, 0] == 0.0)
     assert np.var(samples[:, 1:], axis=0) == pytest.approx([4.0 * rt, 4.0 * rt], rel=0.12)
+
+
+def test_quantum_diatomic_rotor_matches_discrete_canonical_population():
+    random.seed(112358)
+    inertia_temperature = 1.0
+    samples = np.array(
+        [thermal_rot_quantum_spherical_top(0.001, inertia_temperature / 0.001) for _ in range(30000)]
+    )
+    states = np.arange(16)
+    expected = (2 * states + 1) * np.exp(-states * (states + 1) / (2.0 * inertia_temperature))
+    expected /= expected.sum()
+    observed = np.bincount(samples, minlength=len(states))[: len(states)] / len(samples)
+
+    assert np.abs(observed - expected).sum() < 0.035
+
+
+def test_relative_coordinate_helper_honors_thermal_collision_energy(monkeypatch):
+    monkeypatch.setattr("sampling.rel_init_coords.thermal_collision_energy", lambda rt: 0.125)
+    mass_a = np.array([2.0])
+    mass_b = np.array([3.0])
+    _bimp, _q, p = setRelativeInitCoords(
+        mass_a,
+        mass_b,
+        np.zeros(3),
+        np.zeros(3),
+        np.zeros(3),
+        np.zeros(3),
+        Ecoll=None,
+        Ecoll_thermal=True,
+        temp=300.0,
+        bmax=0.0,
+        Rini=5.0,
+    )
+    velocity_a = p[:3] / mass_a[0]
+    velocity_b = p[3:] / mass_b[0]
+    reduced_mass = mass_a[0] * mass_b[0] / (mass_a[0] + mass_b[0])
+
+    assert 0.5 * reduced_mass * np.dot(velocity_a - velocity_b, velocity_a - velocity_b) == pytest.approx(0.125)
 
 
 @pytest.mark.parametrize(

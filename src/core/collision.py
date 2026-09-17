@@ -103,6 +103,13 @@ class Collision(Molecule):
         self.redmass = 0.0
         self.fragment_A = fragment_A
         self.fragment_B = fragment_B
+        self.nfix = (
+            fragment_A.non_com_removed_dof() + fragment_B.non_com_removed_dof()
+        )
+        self.remove_com = True
+        self._nfix_includes_com = False
+        self.copy_rigid_constraint_groups_from(fragment_A, atom_offset=0)
+        self.copy_rigid_constraint_groups_from(fragment_B, atom_offset=fragment_A.natom)
         self.sampling_set = False
         self.Rcom = None
 
@@ -457,6 +464,18 @@ class Collision(Molecule):
         sample_fragment(self.fragment_A)
         sample_fragment(self.fragment_B)
 
+        # Preserve per-fragment sampling decisions in the collision-level
+        # metadata written by parallel trajectory runs.  This includes, for
+        # example, the effective frequency used for a thermally sampled soft
+        # vibrational mode.
+        self.sampling_metadata = []
+        for fragment_label, fragment in (("A", self.fragment_A), ("B", self.fragment_B)):
+            for record in getattr(fragment, "sampling_metadata", ()):
+                enriched_record = dict(record)
+                enriched_record["fragment"] = fragment_label
+                self.sampling_metadata.append(enriched_record)
+        self.sampling_warnings = self.sampling_metadata
+
 
         if self.fragment_A.surface or self.fragment_B.surface:
             self.set_relative_init_coords_surface()
@@ -479,7 +498,11 @@ class Collision(Molecule):
 
     def sample_and_run_collision(self, integrator='verlet', integrator_order=4, timestep=1.0, startstep=0, maxstep=100, iprint=2,
                                       traj_file=None, backfile=None, restart=False, pairs_to_stop=None, Rstop=None,
-                                      thermostat=None, thermo_param=None, thermo_temp=None, spectrum=False, **kwargs):
+                                      reaction_persistence_steps=1,
+                                      thermostat=None, thermo_param=None, thermo_temp=None, spectrum=False,
+                                      constraint_algorithm="rattle", constraint_tolerance=1.0e-10,
+                                      constraint_velocity_tolerance=1.0e-10,
+                                      constraint_max_iterations=200, **kwargs):
 
         if traj_file is None:
             traj_file = 'traj_of_reaction_' + self.fragment_A.fname + '_+_' + self.fragment_B.fname + '.xyz'
@@ -490,7 +513,7 @@ class Collision(Molecule):
         if pairs_to_stop is None and Rstop is None:
             raise ValueError("\nEither Rstop or pairs_to_stop must be given in the input")
 
-        post_collision_analysis = kwargs.pop("post_collision_analysis", False)
+        post_collision_analysis = kwargs.pop("post_collision_analysis", True)
         post_collision_analysis_file = kwargs.pop("post_collision_analysis_file", None)
         post_collision_bond_th_HX = kwargs.pop("post_collision_bond_th_HX", 1.5)
         post_collision_bond_th_XX = kwargs.pop("post_collision_bond_th_XX", 2.0)
@@ -514,9 +537,14 @@ class Collision(Molecule):
             collision=True,
             Rstop=Rstop,
             pairs_to_stop=pairs_to_stop,
+            reaction_persistence_steps=reaction_persistence_steps,
             thermostat=thermostat,
             thermo_param=thermo_param,
             thermo_temp=thermo_temp,
+            constraint_algorithm=constraint_algorithm,
+            constraint_tolerance=constraint_tolerance,
+            constraint_velocity_tolerance=constraint_velocity_tolerance,
+            constraint_max_iterations=constraint_max_iterations,
             spectrum=spectrum,
             post_collision_analysis=post_collision_analysis,
             post_collision_analysis_file=post_collision_analysis_file,
@@ -529,7 +557,9 @@ class Collision(Molecule):
 
     def post_collision_analysis(self, output_file=None, channel=None, formula=None, step=None, time_fs=None,
                                 bond_th_HX=1.5, bond_th_XX=2.0, equilibrium_geometries=None,
-                                channel_state=None, isolation_distance=100.0):
+                                channel_state=None, isolation_distance=100.0,
+                                trajectory_initial_energy_hartree=None,
+                                trajectory_final_energy_hartree=None):
         result = compute_collision_vector_correlations(
             self,
             output_file=output_file,
@@ -542,6 +572,8 @@ class Collision(Molecule):
             equilibrium_geometries=equilibrium_geometries,
             channel_state=channel_state,
             isolation_distance=isolation_distance,
+            trajectory_initial_energy_hartree=trajectory_initial_energy_hartree,
+            trajectory_final_energy_hartree=trajectory_final_energy_hartree,
         )
         self.post_collision_analysis_result = result
         return result
@@ -552,6 +584,7 @@ class Collision(Molecule):
                                                integrator='verlet', integrator_order=4, timestep=1.0,
                                                startstep=0, maxstep=100, iprint=2, traj_file=None,
                                                backfile=None, restart=False, pairs_to_stop=None, Rstop=None,
+                                               reaction_persistence_steps=1,
                                                thermostat=None, thermo_param=None, thermo_temp=None,
                                                spectrum=False, base_seed=None, **kwargs):
         from parallel.trajectory_runner import run_parallel_collisions
@@ -581,12 +614,13 @@ class Collision(Molecule):
             iprint=iprint,
             restart=restart,
             pairs_to_stop=pairs_to_stop,
+            reaction_persistence_steps=reaction_persistence_steps,
             Rstop=Rstop,
             thermostat=thermostat,
             thermo_param=thermo_param,
             thermo_temp=thermo_temp,
             spectrum=spectrum,
-            post_collision_analysis=kwargs.pop("post_collision_analysis", False),
+            post_collision_analysis=kwargs.pop("post_collision_analysis", True),
             post_collision_analysis_file=kwargs.pop("post_collision_analysis_file", None),
             post_collision_bond_th_HX=kwargs.pop("post_collision_bond_th_HX", 1.5),
             post_collision_bond_th_XX=kwargs.pop("post_collision_bond_th_XX", 2.0),
@@ -624,5 +658,3 @@ class Collision(Molecule):
 
     def multi_paralell_traj_sample_and_run_collision(self, *args, **kwargs):
         return self.parallel_traj_sample_and_run_collision(*args, **kwargs)
-
-

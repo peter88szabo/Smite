@@ -60,17 +60,39 @@ def prepare_thermostat(molecule, thermostat, thermo_param, thermo_temp, dt, rest
 
 
 def apply_thermostat(molecule, thermostat, thermo_param, thermo_temp, dt):
+    has_constraints = getattr(molecule, "has_rigid_constraints", False)
+    removed_dof = (
+        molecule.thermostat_removed_dof() if thermostat is not None else 0
+    )
     if thermostat == "berendsen":
         tau = thermo_param * FS_TO_AU_TIME
-        molecule.p = thermo_berendsen(molecule.nfix, molecule.p, molecule.wmass, dt, tau, thermo_temp)
+        molecule.p = thermo_berendsen(removed_dof, molecule.p, molecule.wmass, dt, tau, thermo_temp)
     elif thermostat == "andersen":
-        molecule.p = thermo_andersen(molecule.nfix, molecule.p, molecule.wmass, dt, thermo_param, thermo_temp)
+        collision_time = thermo_param * FS_TO_AU_TIME
+        molecule.p = thermo_andersen(removed_dof, molecule.p, molecule.wmass, dt, collision_time, thermo_temp)
     elif thermostat == "nosehoover":
         tau = thermo_param * FS_TO_AU_TIME
         molecule.p, molecule._nosehoover_state = thermo_nosehoover(
-            molecule.nfix, molecule.p, molecule.wmass, dt, tau, thermo_temp, molecule._nosehoover_state
+            removed_dof,
+            molecule.p,
+            molecule.wmass,
+            dt,
+            tau,
+            thermo_temp,
+            molecule._nosehoover_state,
+            scale_all=has_constraints,
         )
     elif thermostat == "gle":
-        molecule.p = thermo_gle(molecule.nfix, molecule.p, molecule.wmass, molecule._gle_state)
+        molecule.p = thermo_gle(removed_dof, molecule.p, molecule.wmass, molecule._gle_state)
+
+    if thermostat is not None and getattr(molecule, "remove_com", False):
+        molecule.project_center_of_mass_momentum()
+
+    if (
+        thermostat is not None
+        and getattr(molecule, "has_rigid_constraints", False)
+        and molecule._constraint_algorithm == "rattle"
+    ):
+        molecule.project_rigid_momenta()
 
     return molecule.p

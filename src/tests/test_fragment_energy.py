@@ -82,6 +82,9 @@ def test_qchem_fragments_are_evaluated_independently_with_declared_states():
     np.testing.assert_allclose(
         [partition["vibrational_energy"] for partition in partitions], [1.0, 11.0]
     )
+    np.testing.assert_allclose(
+        [partition["translational_kinetic_energy"] for partition in partitions], [0.0, 0.0]
+    )
 
     initial = reactant_total_energy(collision, _states(), energy_evaluator=evaluator)
     final = product_total_energy(collision, fragments, records, energy_evaluator=evaluator)

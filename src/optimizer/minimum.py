@@ -44,13 +44,10 @@ def _line_search_cartesian(qcinput, atoms, q, energy, grad, step, *, min_scale=1
         trial_energy = _energy(qcinput, trial_q, atoms)
         if trial_energy <= energy + 1.0e-4 * scale * directional or trial_energy < energy:
             trial_grad = _gradient(qcinput, trial_q, atoms)
-            return trial_q, trial_energy, trial_grad, scale * step, scale
+            return trial_q, trial_energy, trial_grad, scale * step, scale, True
         scale *= 0.5
-
-    trial_q = q + scale * step
-    trial_energy = _energy(qcinput, trial_q, atoms)
-    trial_grad = _gradient(qcinput, trial_q, atoms)
-    return trial_q, trial_energy, trial_grad, scale * step, scale
+    # Never silently accept an uphill step after Armijo backtracking fails.
+    return q.copy(), float(energy), np.asarray(grad, dtype=float).copy(), np.zeros_like(step), 0.0, False
 
 def _smite_cartesian_optimize_geometry(
     qcinput,
@@ -102,13 +99,29 @@ def _smite_cartesian_optimize_geometry(
                     alpha = denom2 / denom1 if abs(denom1) > 1.0e-16 else 0.7
                 else:
                     alpha = float(np.dot(dX, dX)) / denom2 if abs(denom2) > 1.0e-16 else 0.7
+                if not np.isfinite(alpha) or alpha <= 0.0:
+                    alpha = 0.7
+                alpha = min(alpha, 10.0)
                 step = step_limit(-alpha * grad, max_component=step_max_component)
             else:
                 step = step_limit(-h_inv @ grad, max_component=step_max_component)
 
-            trial_q, trial_energy, trial_grad, accepted_step, _scale = _line_search_cartesian(
+            # A non-descent quasi-Newton direction cannot satisfy Armijo.
+            if float(np.dot(grad, step)) >= 0.0:
+                step = step_limit(-grad, max_component=step_max_component)
+
+            trial_q, trial_energy, trial_grad, accepted_step, _scale, accepted = _line_search_cartesian(
                 qcinput, atoms, q, energy, grad, step
             )
+            if not accepted:
+                message = "Line search failed to find a downhill Cartesian step"
+                if print_report:
+                    _print_optimization_status(False, message)
+                return OptimizationResult(
+                    atoms=atoms, q=q, energy=energy, converged=False, nsteps=istep - 1,
+                    method=method, backend_optimizer="smite", trajectory_file=trajectory_file,
+                    gradient=grad, message=message, coordinates="cartesian",
+                )
             energy_change = trial_energy - energy
 
             if print_report:
@@ -210,21 +223,12 @@ def _line_search_internal(
         trial_energy = _energy(qcinput, trial_q, atoms)
         if trial_energy < energy:
             trial_grad_x = _gradient(qcinput, trial_q, atoms)
-            return trial_q, trial_energy, trial_grad_x, scale * dq, trial_q - q, scale
+            return trial_q, trial_energy, trial_grad_x, scale * dq, trial_q - q, scale, True
         scale *= 0.5
-
-    trial_q = best_fit_dq_to_cart(
-        q,
-        qs,
-        scale * dq,
-        ic,
-        bpg,
-        n_iter=best_fit_iters,
-        rms_tol=best_fit_rms_tol,
+    return (
+        np.asarray(q, dtype=float).copy(), float(energy), np.asarray(grad_x, dtype=float).copy(),
+        np.zeros_like(dq), np.zeros_like(q), 0.0, False,
     )
-    trial_energy = _energy(qcinput, trial_q, atoms)
-    trial_grad_x = _gradient(qcinput, trial_q, atoms)
-    return trial_q, trial_energy, trial_grad_x, scale * dq, trial_q - q, scale
 
 def _smite_internal_optimize_geometry(
     qcinput,
@@ -355,7 +359,7 @@ def _smite_internal_optimize_geometry(
             old_grad_q = grad_q
             old_qs = qs
 
-            q, energy, grad_x, accepted_dq, cart_step, scale = _line_search_internal(
+            q, energy, grad_x, accepted_dq, cart_step, scale, accepted = _line_search_internal(
                 qcinput,
                 atoms,
                 q,
@@ -368,6 +372,15 @@ def _smite_internal_optimize_geometry(
                 best_fit_iters=best_fit_iters,
                 best_fit_rms_tol=best_fit_rms_tol,
             )
+            if not accepted:
+                message = "Line search failed to find a downhill internal-coordinate step"
+                if print_report:
+                    _print_optimization_status(False, message)
+                return OptimizationResult(
+                    atoms=atoms, q=old_q, energy=old_energy, converged=False, nsteps=istep - 1,
+                    method=method, backend_optimizer="smite", trajectory_file=trajectory_file,
+                    gradient=grad_x, message=message, coordinates="internal",
+                )
             energy_change = energy - old_energy
 
             if use_redundant_internals:
@@ -421,26 +434,6 @@ def _smite_internal_optimize_geometry(
                 if np.all(np.isfinite(hess_candidate)):
                     hess_q = hess_candidate
 
-            if scale <= 1.0e-4 and energy > old_energy:
-                q = old_q
-                energy = old_energy
-                qs = old_qs
-                bpg = _bpg_for_internal_coordinates(
-                    q,
-                    ic,
-                    use_redundant_internals=use_redundant_internals,
-                )
-                grad_x = _gradient(qcinput, q, atoms)
-                grad_q = old_grad_q
-                if use_redundant_internals:
-                    redundant_system = _current_redundant_system(
-                        q,
-                        ic,
-                        use_redundant_internals=use_redundant_internals,
-                    )
-                    hess_q = initial_redundant_hessian_from_model(redundant_system, model=internal_hessian_model)
-                else:
-                    hess_q = initial_internal_hessian_from_model(ic, q_values=qs, model=internal_hessian_model)
     finally:
         if traj_handle is not None:
             traj_handle.close()

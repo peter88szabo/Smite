@@ -40,6 +40,8 @@ def _maybe_run_frequency_analysis(
     thermo_temp=298.15,
     thermo_pressure=101325.0,
     thermo_multiplicity=None,
+    thermo_symmetry_number=1.0,
+    thermo_chirality_number=1.0,
 ):
     if not run_frequency_analysis:
         return result
@@ -60,6 +62,8 @@ def _maybe_run_frequency_analysis(
         temp=thermo_temp,
         pressure=thermo_pressure,
         multiplicity=thermo_multiplicity,
+        symmetry_number=thermo_symmetry_number,
+        chirality_number=thermo_chirality_number,
         electronic_energy=result.energy,
     )
     return result
@@ -137,6 +141,8 @@ def optimize_geometry(
     thermo_temp=298.15,
     thermo_pressure=101325.0,
     thermo_multiplicity=None,
+    thermo_symmetry_number=1.0,
+    thermo_chirality_number=1.0,
     settings=None,
     reporter=None,
     verbosity=1,
@@ -364,6 +370,8 @@ def optimize_geometry(
                 thermo_pressure=thermo_pressure,
                 thermo_multiplicity=thermo_multiplicity,
                 reporter=reporter,
+                thermo_symmetry_number=thermo_symmetry_number,
+                thermo_chirality_number=thermo_chirality_number,
                 _reporter_active=True,
             )
 
@@ -384,8 +392,9 @@ def optimize_geometry(
             thermo_temp=thermo_temp,
             thermo_pressure=thermo_pressure,
             thermo_multiplicity=thermo_multiplicity,
+            thermo_symmetry_number=thermo_symmetry_number,
+            thermo_chirality_number=thermo_chirality_number,
         )
-
     if backend_optimizer not in {"auto", "backend", "smite"}:
         raise ValueError("backend_optimizer must be 'auto', 'backend', or 'smite'")
     if coordinates not in {"internal", "cartesian"}:

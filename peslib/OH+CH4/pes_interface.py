@@ -97,7 +97,21 @@ class PESCalculator:
         o_index = atoms.index("O")
         h_indices = [i for i, atom in enumerate(atoms) if atom == "H"]
 
-        oh_h_index = min(h_indices, key=lambda idx: np.linalg.norm(q.reshape(self.natoms, 3)[idx] - q.reshape(self.natoms, 3)[o_index]))
+        # The native PES distinguishes the OH hydrogen from the four methane
+        # hydrogens. This must be an immutable input-atom identity: choosing
+        # the closest H at every PES call switches the coordinate permutation
+        # during H abstraction and creates a discontinuous force field.
+        oh_h_index = self.config.get("oh_h_index", self.config.get("oh_h_atom_index"))
+        if oh_h_index is None:
+            raise ValueError(
+                "OH+CH4 requires qcinput['oh_h_index'] (the zero-based index "
+                "of the OH hydrogen in the supplied atom ordering)."
+            )
+        if isinstance(oh_h_index, bool) or int(oh_h_index) != oh_h_index:
+            raise ValueError("OH+CH4 oh_h_index must be an integer atom index")
+        oh_h_index = int(oh_h_index)
+        if oh_h_index not in h_indices:
+            raise ValueError("OH+CH4 oh_h_index must refer to one of the five H atoms")
         ch_h_indices = [idx for idx in h_indices if idx != oh_h_index]
 
         # Native POTLIB order for this PES is H1, C, H3, H4, H2, O, H(O).

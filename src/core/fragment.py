@@ -163,6 +163,14 @@ class Fragment(Molecule):
             this.vibsampling = None
         this.rotsampling = None
         this.nfix = nfix
+        this.remove_com = True
+        this._nfix_includes_com = bool(not rigid and int(nfix) >= 3)
+        if rigid:
+            this.add_rigid_constraint_group(
+                np.arange(this.natom),
+                reference_q=this.q_ini,
+                degrees_of_freedom_removed=nfix,
+            )
 
         return this 
 
@@ -212,7 +220,15 @@ class Fragment(Molecule):
         this.random_rot = random_rot
         this.linear     = linear
         this.nfix       = nfix
+        this.remove_com = True
+        this._nfix_includes_com = bool(not rigid and int(nfix) >= 3)
         this.fromMD     = fromMD
+        if rigid:
+            this.add_rigid_constraint_group(
+                np.arange(this.natom),
+                reference_q=this.q_ini,
+                degrees_of_freedom_removed=nfix,
+            )
 
         #set the number of processors if not Orca used as qchem
         #this.init_qchem_interface()
@@ -412,8 +428,12 @@ class Fragment(Molecule):
 
     def sample_and_run_trajectory(self, integrator='verlet', integrator_order=4, timestep=1.0, startstep=0, maxstep=100, iprint=1,
                                   traj_file=None, backfile=None, Rstop=None, pairs_to_stop=None,
+                                  reaction_persistence_steps=1,
                                   thermostat=None, thermo_param=None, thermo_temp=None, spectrum=False,
-                                  restart=False, **sampling_kwargs):
+                                  restart=False, constraint_algorithm="rattle",
+                                  constraint_tolerance=1.0e-10,
+                                  constraint_velocity_tolerance=1.0e-10,
+                                  constraint_max_iterations=200, **sampling_kwargs):
 
         if traj_file is None:
             traj_file = 'traj_' + self.fname + '.xyz' 
@@ -438,9 +458,29 @@ class Fragment(Molecule):
             raise ValueError("\nEither Rstop or pairs_to_stop must be given in the input")
 
 
-        self.run_trajectory(integrator=integrator, integrator_order=integrator_order, timestep=timestep, startstep=startstep, maxstep=maxstep,
-                            iprint=iprint, traj_file=traj_file,  backfile=backfile, restart=restart,
-                            Rstop=Rstop, pairs_to_stop=pairs_to_stop, thermostat=thermostat, thermo_param=thermo_param, thermo_temp=thermo_temp, spectrum=spectrum)
+        self.run_trajectory(
+            integrator=integrator,
+            integrator_order=integrator_order,
+            timestep=timestep,
+            startstep=startstep,
+            maxstep=maxstep,
+            iprint=iprint,
+            traj_file=traj_file,
+            backfile=backfile,
+            restart=restart,
+            Rstop=Rstop,
+            pairs_to_stop=pairs_to_stop,
+            reaction_persistence_steps=reaction_persistence_steps,
+            thermostat=thermostat,
+            thermo_param=thermo_param,
+            thermo_temp=thermo_temp,
+            constraint_algorithm=constraint_algorithm,
+            constraint_tolerance=constraint_tolerance,
+            constraint_velocity_tolerance=constraint_velocity_tolerance,
+            constraint_max_iterations=constraint_max_iterations,
+            spectrum=spectrum,
+        )
+
 
 
     def print_mode_sampling(self):
@@ -479,10 +519,17 @@ class Fragment(Molecule):
             raise ValueError("ERROR: Polyatom_Sample requires more than two atoms.")
 
         if not self.rigid and not self.fromMD and not self.MDprimitive:
+            self.sampling_metadata = []
+            # Backward-compatible public attribute; warnings and sampling
+            # decisions are now recorded in one trajectory metadata stream.
+            self.sampling_warnings = self.sampling_metadata
             self.q, self.p = polyatom_vibration_sampling(mass=self.mass, atoms=self.atoms, q_eq=self.q_ini, ww=self.freq, L=self.Lmat,
                                                    vib_modes=self.vibsampling, verbosity=verbosity, traj_index=traj_index,
                                                    mode_energy_diagnostics=kwargs.get("mode_energy_diagnostics", True),
-                                                   mode_energy_file=kwargs.get("mode_energy_file", "sampled_mode_energy_diagnostics.dat"))
+                                                   mode_energy_file=kwargs.get("mode_energy_file", "sampled_mode_energy_diagnostics.dat"),
+                                                   imaginary_mode_policy=kwargs.get("imaginary_mode_policy", "exclude"),
+                                                   thermal_frequency_cutoff_cm1=kwargs.get("thermal_frequency_cutoff_cm1", 0.0),
+                                                   sampling_metadata=self.sampling_metadata)
 
         if not self.rigid and self.fromMD and not self.MDprimitive:
             self.sampling_polyatom_from_MDfile() 

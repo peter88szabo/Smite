@@ -5,6 +5,7 @@ from integrators.rungekutta import rk4
 from integrators.symplectic import Symplectic
 from integrators.sprk import SPRK
 from integrators.predcorr import PredCorr
+from integrators.rattle import constrained_velocity_verlet
 
 
 def initialize_integrator(name, order, ndim):
@@ -18,7 +19,30 @@ def initialize_integrator(name, order, ndim):
 
 
 def apply_integrator(molecule, name, dt, propagator=None):
-    if name == "stormer":
+    if getattr(molecule, "has_rigid_constraints", False):
+        if molecule._constraint_solver is None:
+            molecule.prepare_rigid_constraints(
+                algorithm=molecule._constraint_algorithm,
+                position_tolerance=molecule._constraint_position_tolerance,
+                velocity_tolerance=molecule._constraint_velocity_tolerance,
+                max_iterations=molecule._constraint_max_iterations,
+            )
+        if name not in {"verlet", "leapfrog"}:
+            raise ValueError(
+                "Rigid SHAKE/RATTLE propagation currently supports only the "
+                "verlet and leapfrog integrators"
+            )
+        molecule.q, molecule.p = constrained_velocity_verlet(
+            molecule.qchem,
+            dt,
+            molecule.wmass,
+            molecule.q,
+            molecule.p,
+            molecule.atoms,
+            molecule._constraint_solver,
+            apply_rattle=molecule._constraint_algorithm == "rattle",
+        )
+    elif name == "stormer":
         molecule.q, molecule.p = stormer_verlet(molecule.qchem, dt, molecule.wmass, molecule.q, molecule.p, molecule.atoms)
     elif name == "verlet":
         molecule.q, molecule.p = velverlet(molecule.qchem, dt, molecule.wmass, molecule.q, molecule.p, molecule.atoms)

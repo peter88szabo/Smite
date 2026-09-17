@@ -54,24 +54,34 @@ def matrix_exp(matrix, taylor_order=15, scale_power=15):
 
 
 def cholesky_stabilized(matrix):
-    n = matrix.shape[0]
-    lmat = np.zeros_like(matrix, dtype=float)
-    dmat = np.zeros_like(matrix, dtype=float)
+    """Return a factor ``S`` satisfying ``S @ S.T == matrix``.
 
-    for i in range(n):
-        lmat[i, i] = 1.0
-        for j in range(i):
-            value = matrix[i, j]
-            for k in range(j):
-                value -= lmat[i, k] * lmat[j, k] * dmat[k, k]
-            lmat[i, j] = value / dmat[j, j] if dmat[j, j] != 0.0 else 0.0
+    GLE covariance matrices can be positive semidefinite, so a conventional
+    Cholesky factorization is too strict when a decoupled auxiliary variable
+    gives an exact zero eigenvalue. Use a symmetric eigensystem, reject
+    genuinely indefinite inputs, and clip only round-off-sized negatives.
 
-        value = matrix[i, i]
-        for k in range(i):
-            value -= lmat[i, k] * lmat[i, k] * dmat[k, k]
-        dmat[i, i] = np.sqrt(value) if value >= 0.0 else 0.0
+    The historical public name is retained for compatibility even though the
+    returned square root is not necessarily triangular.
+    """
+    matrix = np.asarray(matrix, dtype=float)
+    if matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
+        raise ValueError("GLE covariance matrix must be square")
+    if not np.all(np.isfinite(matrix)):
+        raise ValueError("GLE covariance matrix must contain only finite values")
 
-    return lmat @ dmat
+    symmetric = 0.5 * (matrix + matrix.T)
+    eigenvalues, eigenvectors = np.linalg.eigh(symmetric)
+    scale = max(1.0, float(np.max(np.abs(eigenvalues))))
+    tolerance = 1.0e-12 * scale
+    if float(np.min(eigenvalues)) < -tolerance:
+        raise ValueError(
+            "GLE covariance matrix is not positive semidefinite: "
+            f"minimum eigenvalue={float(np.min(eigenvalues)):.6e}"
+        )
+
+    eigenvalues = np.clip(eigenvalues, 0.0, None)
+    return eigenvectors * np.sqrt(eigenvalues)[None, :]
 
 
 class GLEThermostat:
@@ -93,7 +103,9 @@ class GLEThermostat:
             gC = np.eye(self.ns + 1) * kt
 
         self.gT = matrix_exp(-dt * gA)
-        self.gS = cholesky_stabilized(gC - self.gT @ gC @ self.gT.T)
+        noise_covariance = gC - self.gT @ gC @ self.gT.T
+        noise_covariance = 0.5 * (noise_covariance + noise_covariance.T)
+        self.gS = cholesky_stabilized(noise_covariance)
 
         c_chol = cholesky_stabilized(gC)
         noise = self.rng.normal(size=(ndim, self.ns + 1))
@@ -101,12 +113,12 @@ class GLEThermostat:
 
     def step(self, p, wmass, nfix=0):
         p = np.array(p, copy=True)
-        nactive = len(p) - int(nfix)
-        if nactive < 0:
-            raise ValueError("GLE nfix cannot exceed the number of momentum components")
-        active = np.arange(nactive)
-        if len(active) == 0:
-            return p
+        removed_dof = int(nfix)
+        if removed_dof < 0 or removed_dof >= len(p):
+            raise ValueError("GLE nfix must satisfy 0 <= nfix < 3N")
+        # nfix is a count, not a suffix of Cartesian coordinates to freeze.
+        # COM and holonomic constraints are projected after the OU update.
+        active = np.arange(len(p))
 
         mass_sqrt = np.sqrt(np.asarray(wmass, dtype=float)[active])
         self.gp[active, 0] = p[active] / mass_sqrt

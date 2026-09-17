@@ -1,0 +1,22 @@
+{
+  "atoms": [
+    "C",
+    "C",
+    "C",
+    "C",
+    "C",
+    "H",
+    "H",
+    "H",
+    "H",
+    "H",
+    "H",
+    "H",
+    "H"
+  ],
+  "coordinate_hash": "a36fd8e9805d859dea91e5b05cb44b2f3612b02edf3be1fdb1459d68717c203b",
+  "coordinates_unit": "bohr",
+  "dimension": 39,
+  "electronic_model": "0a920497a1ac0b582cadb6a2481b793ee89c698b9b0559349f234b586781b996",
+  "version": 1
+}

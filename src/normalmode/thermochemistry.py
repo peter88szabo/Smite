@@ -20,7 +20,7 @@ CM1_TO_K = 1.43877
 CM1_TO_HARTREE = 4.55635e-6
 CM1_TO_KCAL = 2.85914e-3
 PASCAL_TO_AU = 1.0e-13 / 2.9421912
-AMU_TO_ELECMASS = 1836.15267343
+AMU_TO_ELECMASS = ATOMIC_MASS_GMOL_TO_AU
 HPLANCK_AU_SQ = (2.0 * PI) ** 2
 J_PER_HARTREE_PER_MOL = HARTREE_TO_KJMOL * 1000.0
 
@@ -163,20 +163,25 @@ def _all_translation(thermo, mass_amu_total, pressure, temp):
     thermo.cptrans = 2.5 * RGAS_AU
 
 
-def _all_rotations(thermo, brot_cm1, temp):
+def _all_rotations(thermo, brot_cm1, temp, symmetry_number=1.0, chirality_number=1.0):
     brot = np.asarray(brot_cm1, dtype=float)
     if brot.size == 0:
         return
 
     rt = RGAS_AU * temp
-    sigma = 1.0
-    chiral = 1.0
+    sigma = float(symmetry_number)
+    chiral = float(chirality_number)
     eps = 1.0e-12
     nonzero = brot[brot > eps]
     has_zero = np.any(brot <= eps)
+    # Atoms have no rotational partition function. Their inertia calculation
+    # yields three zero constants, which must not become a fictitious near-free
+    # linear rotor.
+    if nonzero.size == 0:
+        return
 
     if has_zero or nonzero.size <= 1:
-        brot_mean = float(np.mean(nonzero)) if nonzero.size else max(float(brot[0]), 1.0e-6)
+        brot_mean = float(np.mean(nonzero))
         theta_r = brot_mean * CM1_TO_K
         pf = (temp / theta_r) * (chiral / sigma)
         dof = 2.0
@@ -264,11 +269,18 @@ def _all_vibrations(thermo, freqs_cm1, temp, freq_cutoff):
         thermo.pfvib *= pf_mode
 
 
-def eval_thermo(freqs_cm1, brot_cm1, mass_amu_total, multiplicity, temp, pressure, freq_cutoff):
+def eval_thermo(freqs_cm1, brot_cm1, mass_amu_total, multiplicity, temp, pressure, freq_cutoff, *, symmetry_number=1.0, chirality_number=1.0):
+    symmetry_number = float(symmetry_number)
+    chirality_number = float(chirality_number)
+    if not np.isfinite(symmetry_number) or symmetry_number <= 0.0:
+        raise ValueError("symmetry_number must be finite and positive")
+    if not np.isfinite(chirality_number) or chirality_number <= 0.0:
+        raise ValueError("chirality_number must be finite and positive")
+
     thermo = ThermoResults()
     _all_electronic(thermo, multiplicity, temp)
     _all_translation(thermo, mass_amu_total, pressure, temp)
-    _all_rotations(thermo, brot_cm1, temp)
+    _all_rotations(thermo, brot_cm1, temp, symmetry_number, chirality_number)
     _all_vibrations(thermo, freqs_cm1, temp, freq_cutoff)
 
     thermo.utherm = thermo.uelec + thermo.utrans + thermo.urot + thermo.uvib
@@ -290,7 +302,7 @@ def eval_thermo(freqs_cm1, brot_cm1, mass_amu_total, multiplicity, temp, pressur
     return thermo
 
 
-def print_thermo(thermo, temp, freq_cutoff, electronic_energy=None):
+def print_thermo(thermo, temp, freq_cutoff, electronic_energy=None, symmetry_number=1.0, chirality_number=1.0):
     def print_uhfg(label, u, h, f, g):
         print(f"{label:<14} {u:>12.6f}  {h:>12.6f}  {f:>12.6f}  {g:>12.6f}")
 
@@ -300,6 +312,8 @@ def print_thermo(thermo, temp, freq_cutoff, electronic_energy=None):
     print()
     print("========================= Thermochemistry =========================")
     print(f"T = {temp:.2f} K")
+    print(f"Rotational symmetry number: {float(symmetry_number):g}")
+    print(f"Chirality number: {float(chirality_number):g}")
     print(f"ZPE: {thermo.zpe:>12.6f} Eh  ({thermo.zpe * CM1_TO_KCAL / CM1_TO_HARTREE:>10.3f} kcal/mol)")
     print(f"qRRHO cutoff: {freq_cutoff:.1f} cm-1")
     print()
@@ -359,10 +373,15 @@ def thermochemistry_analysis(
     pressure=101325.0,
     multiplicity=1,
     qrrho_cutoff=50.0,
+    symmetry_number=1.0,
+    chirality_number=1.0,
     electronic_energy=None,
     print_report=True,
 ):
-    del atoms
+    atoms = list(atoms)
+    if len(atoms) != len(mass):
+        raise ValueError("thermochemistry_analysis requires one mass per atom")
+
     mass = np.asarray(mass, dtype=float)
     mass_amu = _mass_au_to_amu(mass)
     if freqs_cm1 is None:
@@ -380,12 +399,23 @@ def thermochemistry_analysis(
         float(temp),
         float(pressure),
         float(qrrho_cutoff),
+        symmetry_number=float(symmetry_number),
+        chirality_number=float(chirality_number),
     )
     if print_report:
-        print_thermo(thermo, float(temp), float(qrrho_cutoff), electronic_energy=electronic_energy)
+        print_thermo(
+            thermo,
+            float(temp),
+            float(qrrho_cutoff),
+            electronic_energy=electronic_energy,
+            symmetry_number=symmetry_number,
+            chirality_number=chirality_number,
+        )
     return {
         "thermo": thermo,
         "freqs_cm1": freqs_cm1,
         "rotational_constants_cm1": brot_cm1,
         "mass_amu_total": float(np.sum(mass_amu)),
+        "symmetry_number": float(symmetry_number),
+        "chirality_number": float(chirality_number),
     }

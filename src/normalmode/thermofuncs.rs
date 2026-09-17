@@ -5,7 +5,7 @@ const PI_SQ: f64 = PI * PI;
 const TWOPI: f64 = 2.0 * PI;
 
 const CLIGHT: f64 = 137.035999074;
-const AMU_TO_ELECMASS: f64 = 1836.15267343;
+const AMU_TO_ELECMASS: f64 = 1822.88848628;
 
 const HPLANCK_AU: f64 = TWOPI;
 const HPLANCK_AU_SQ: f64 = TWOPI * TWOPI;
@@ -111,6 +111,8 @@ pub fn eval_thermo(
     temp: f64,
     pressure: f64,
     freq_cutoff: f64,
+    symmetry_number: f64,
+    chirality_number: f64,
 ) -> ThermoResults {
     let mut thermo = ThermoResults {
         pfelec: 1.0,
@@ -165,7 +167,13 @@ pub fn eval_thermo(
 
     all_electronic(&mut thermo, multiplicity, temp);
     all_translation(&mut thermo, mass_amu_total, pressure, temp);
-    all_rotations(&mut thermo, brot_cm1, temp);
+    all_rotations(
+        &mut thermo,
+        brot_cm1,
+        temp,
+        symmetry_number,
+        chirality_number,
+    );
     all_vibrations(&mut thermo, freqs_cm1, temp, freq_cutoff);
 
     thermo.utherm = thermo.uelec + thermo.utrans + thermo.urot + thermo.uvib;
@@ -351,7 +359,13 @@ fn all_translation(thermo: &mut ThermoResults, mass_amu_total: f64, pressure: f6
     thermo.cptrans = 2.5 * RGAS_AU;
 }
 
-fn all_rotations(thermo: &mut ThermoResults, brot: &[f64], temp: f64) {
+fn all_rotations(
+    thermo: &mut ThermoResults,
+    brot: &[f64],
+    temp: f64,
+    symmetry_number: f64,
+    chirality_number: f64,
+) {
     let RT = RGAS_AU * temp;
 
     if brot.is_empty() {
@@ -366,12 +380,19 @@ fn all_rotations(thermo: &mut ThermoResults, brot: &[f64], temp: f64) {
         return;
     }
 
-    let sigma = 1.0;
-    let chiral = 1.0;
+    assert!(symmetry_number.is_finite() && symmetry_number > 0.0);
+    assert!(chirality_number.is_finite() && chirality_number > 0.0);
+    let sigma = symmetry_number;
+    let chiral = chirality_number;
 
     let eps = 1.0e-12;
     let has_zero = brot.iter().any(|b| *b <= eps);
     let nonzero: Vec<f64> = brot.iter().copied().filter(|b| *b > eps).collect();
+
+    // Three zero rotational constants identify an atom/non-rotating object.
+    if nonzero.is_empty() {
+        return;
+    }
 
     let (pf, dof) = if has_zero || nonzero.len() <= 1 {
         let brot_cm1 = if !nonzero.is_empty() {

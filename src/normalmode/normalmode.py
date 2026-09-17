@@ -154,6 +154,7 @@ def frequency_analysis(qcinput, atoms, q, fname, hessFile=None, linear=False, is
                        Amp_modeanim=30.0, print_nmode=True,
                        print_thermo=True, temp=298.15, pressure=101325.0,
                        multiplicity=None, qrrho_cutoff=50.0,
+                       symmetry_number=1.0, chirality_number=1.0,
                        electronic_energy=None):
     """Run the same Hessian/frequency workflow used for polyatomic initialization.
 
@@ -225,6 +226,8 @@ def frequency_analysis(qcinput, atoms, q, fname, hessFile=None, linear=False, is
             pressure=pressure,
             multiplicity=multiplicity,
             qrrho_cutoff=qrrho_cutoff,
+            symmetry_number=symmetry_number,
+            chirality_number=chirality_number,
             electronic_energy=electronic_energy,
             print_report=True,
         )

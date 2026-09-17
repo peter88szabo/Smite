@@ -7,12 +7,12 @@ class SPRK:
         Initialize the SPRK Integrator with the desired order.
 
         Parameters:
-        - order: Order of the integrator (2, 4, 6, or 8 currently supported).
+        - order: Order of the integrator (2 or 4).
         """
         if order == 2:
             # Strang Splitting (2nd Order)
             self.a_coeffs = [0.5, 0.5]
-            self.b_coeffs = [1.0, 0.0]
+            self.b_coeffs = [0.0, 1.0]
         elif order == 4:
             # Forest-Ruth (4th Order)
             self.a_coeffs = [
@@ -24,7 +24,7 @@ class SPRK:
                 -1.7024143839193156, 1.3512071919596578
             ]
         else:
-            raise ValueError("Unsupported order. Choose 2, 4, 6, or 8.")
+            raise ValueError("Unsupported SPRK order. Choose 2 or 4.")
 
         self.order = order
 

@@ -3,7 +3,12 @@ from pathlib import Path
 
 import numpy as np
 
-from analysis.collision_vectors import collision_vectors, final_product_collision_vectors
+from analysis.collision_vectors import (
+    collision_vectors,
+    final_product_collision_vectors,
+    product_fragments,
+)
+from analysis.conservation import collision_conservation_residuals
 from analysis.fragment_energy import (
     product_energy_partitions,
     product_potential_energies,
@@ -173,16 +178,38 @@ def update_collision_vector_state(collision, stage, fragments=None):
 def analyze_collision(collision, output_file=None, channel=None, formula=None,
                       step=None, time_fs=None, bond_th_HX=1.5, bond_th_XX=2.0,
                       equilibrium_geometries=None, channel_state=None,
-                      isolation_distance=100.0, energy_evaluator=None):
-    fragments, final_vectors = final_product_collision_vectors(
-        collision,
+                      isolation_distance=100.0, energy_evaluator=None,
+                      trajectory_initial_energy_hartree=None,
+                      trajectory_final_energy_hartree=None):
+    """Analyze a confirmed product channel.
+
+    For two detached product fragments this includes the complete existing
+    stereodynamical angle set, relative translation, and orbital angular
+    momentum.  Channels with another number of graph fragments still receive
+    per-fragment energies and conservation diagnostics; two-body observables
+    are explicitly marked unavailable rather than misassigned.
+    """
+    fragments = product_fragments(
+        collision.q,
+        collision.atoms,
         bond_th_HX=bond_th_HX,
         bond_th_XX=bond_th_XX,
     )
+    final_vectors = None
+    analysis_status = "complete"
+    if len(fragments) == 2:
+        _validated_fragments, final_vectors = final_product_collision_vectors(
+            collision,
+            bond_th_HX=bond_th_HX,
+            bond_th_XX=bond_th_XX,
+        )
+    else:
+        analysis_status = "partial_non_bimolecular_products"
 
     if collision.vrel_ini is None or collision.Lorb_ini is None:
         update_collision_vector_state(collision, "initial")
-    update_collision_vector_state(collision, "final", fragments=fragments)
+    if final_vectors is not None:
+        update_collision_vector_state(collision, "final", fragments=fragments)
 
     angles = scattering_angle_dict(
         collision.vrel_ini,
@@ -198,6 +225,11 @@ def analyze_collision(collision, output_file=None, channel=None, formula=None,
         "dihedral_vrel_Jrot_A": calculate_dihedral_angle(collision.vrel_ini, collision.vrel_fin, collision.Jrot_fin_A),
         "dihedral_vrel_Jrot_B": calculate_dihedral_angle(collision.vrel_ini, collision.vrel_fin, collision.Jrot_fin_B),
     }
+    conservation = collision_conservation_residuals(
+        collision,
+        trajectory_initial_energy_hartree=trajectory_initial_energy_hartree,
+        trajectory_final_energy_hartree=trajectory_final_energy_hartree,
+    )
 
     potential_records = None
     initial_total = None
@@ -235,18 +267,41 @@ def analyze_collision(collision, output_file=None, channel=None, formula=None,
         equilibrium_geometries=equilibrium_geometries,
         potential_energies=potential_records,
     )
+    product_translation = float(sum(
+        entry["translational_kinetic_energy"] for entry in fragment_energies
+    ))
+    product_rotation = float(sum(entry["rotational_energy"] for entry in fragment_energies))
+    vibrational_values = [entry["vibrational_energy"] for entry in fragment_energies]
+    product_vibration = (
+        None if any(value is None for value in vibrational_values)
+        else float(sum(vibrational_values))
+    )
+    collision.Erot_fin = product_rotation
+    collision.Evib_fin = product_vibration
 
     result = {
         "channel": channel,
+        "analysis_status": analysis_status,
         "formula": formula,
         "step": step,
         "time_fs": time_fs,
         "product_fragments": fragments,
-        "redmass": final_vectors["redmass"],
+        "redmass": None if final_vectors is None else final_vectors["redmass"],
+        "vrel_ini": collision.vrel_ini,
+        "vrel_fin": collision.vrel_fin,
+        "orbital_angular_momentum_ini": collision.Lorb_ini,
+        "orbital_angular_momentum_fin": collision.Lorb_fin,
+        "fragment_angular_momentum_ini_A": collision.Jrot_ini_A,
+        "fragment_angular_momentum_fin_A": collision.Jrot_fin_A,
+        "fragment_angular_momentum_ini_B": collision.Jrot_ini_B,
+        "fragment_angular_momentum_fin_B": collision.Jrot_fin_B,
         "Erelsq_ini_hartree": collision.Erelsq_ini,
         "Erelsq_fin_hartree": collision.Erelsq_fin,
         "Erelsq_ini_kjmol": None if collision.Erelsq_ini is None else collision.Erelsq_ini * HARTREE_TO_KJMOL,
         "Erelsq_fin_kjmol": None if collision.Erelsq_fin is None else collision.Erelsq_fin * HARTREE_TO_KJMOL,
+        "product_com_translational_energy_hartree": product_translation,
+        "product_rotational_energy_hartree": product_rotation,
+        "product_vibrational_energy_hartree": product_vibration,
         "initial_total_energy_hartree": None if initial_total is None else initial_total["total_energy"],
         "final_total_energy_hartree": None if final_total is None else final_total["total_energy"],
         "energy_relative_to_reactants_hartree": energy_relative,
@@ -258,6 +313,7 @@ def analyze_collision(collision, output_file=None, channel=None, formula=None,
         "angles_deg": angles,
         "dihedrals_deg": dihedrals,
         "fragment_energies": fragment_energies,
+        "conservation": conservation,
     }
 
     if output_file is not None:
@@ -289,6 +345,7 @@ def write_collision_analysis(output_file, result, collision):
         handle.write("# angles are in degrees; vectors are in internal atomic units\n")
         for key in (
             "channel",
+            "analysis_status",
             "formula",
             "step",
             "time_fs",
@@ -297,6 +354,9 @@ def write_collision_analysis(output_file, result, collision):
             "Erelsq_fin_hartree",
             "Erelsq_ini_kjmol",
             "Erelsq_fin_kjmol",
+            "product_com_translational_energy_hartree",
+            "product_rotational_energy_hartree",
+            "product_vibrational_energy_hartree",
             "initial_total_energy_hartree",
             "final_total_energy_hartree",
             "energy_relative_to_reactants_hartree",
@@ -313,12 +373,13 @@ def write_collision_analysis(output_file, result, collision):
             atom_indices = ",".join(str(atom_idx) for atom_idx in fragment["indices"])
             handle.write(f"product_fragment {idx} {fragment['formula']} {atom_indices}\n")
         handle.write(
-            "# fragment_energy index formula rotational_reference internal_kinetic_Eh "
+            "# fragment_energy index formula rotational_reference translational_Eh internal_kinetic_Eh "
             "potential_Eh reference_potential_Eh potential_relative_Eh rotational_Eh vibrational_Eh\n"
         )
         for idx, energy in enumerate(result["fragment_energies"]):
             handle.write(
                 f"fragment_energy {idx} {energy['formula']} {energy['rotational_reference']} "
+                f"{_format_value(energy['translational_kinetic_energy'])} "
                 f"{_format_value(energy['internal_kinetic_energy'])} "
                 f"{_format_value(energy['potential_energy'])} "
                 f"{_format_value(energy['reference_potential_energy'])} "
@@ -335,6 +396,27 @@ def write_collision_analysis(output_file, result, collision):
         handle.write(f"Jrot_fin_A {_format_vector(collision.Jrot_fin_A)}\n")
         handle.write(f"Jrot_ini_B {_format_vector(collision.Jrot_ini_B)}\n")
         handle.write(f"Jrot_fin_B {_format_vector(collision.Jrot_fin_B)}\n")
+
+        conservation = result["conservation"]
+        handle.write("# conservation_quantity initial final final_minus_initial\n")
+        for label in ("linear_momentum", "angular_momentum"):
+            handle.write(
+                f"{label} "
+                f"{_format_vector(conservation[f'{label}_initial'])} "
+                f"{_format_vector(conservation[f'{label}_final'])} "
+                f"{_format_vector(conservation[f'{label}_residual'])}\n"
+            )
+            handle.write(
+                f"{label}_residual_norm "
+                f"{_format_value(conservation[f'{label}_residual_norm'])}\n"
+            )
+        for key in (
+            "trajectory_initial_energy_hartree",
+            "trajectory_final_energy_hartree",
+            "trajectory_energy_residual_hartree",
+            "trajectory_energy_residual_kjmol",
+        ):
+            handle.write(f"{key} {_format_value(conservation[key])}\n")
 
         handle.write("# angle_name angle_deg\n")
         for label in ANGLE_LABELS:

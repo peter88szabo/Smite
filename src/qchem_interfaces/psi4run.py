@@ -4,6 +4,7 @@ import re
 from utils.constants import BOHR_TO_ANGSTROM
 from qchem_interfaces.backend_common import QCBackendError, backend_scratch_dir, parse_error
 from qchem_interfaces.energy_cache import store_energy
+from qchem_interfaces.numerical_hessian import central_difference_hessian
 from qchem_interfaces.wavefunction_output import prepare_wavefunction_output
 
 def makeXYZ(atoms, q):
@@ -17,6 +18,23 @@ def makeXYZ(atoms, q):
             + " "*6+str(q[i*3+2]*BOHR_TO_ANGSTROM) \
             + "\n"
     return xyz
+
+
+def psi4_geometry_specification(charge, multiplicity, xyz):
+    """Build a Psi4 molecule while preserving the caller's laboratory frame.
+
+    QCT/collision coordinates are absolute Cartesian coordinates.  Psi4's
+    default center-of-mass translation and principal-axis reorientation would
+    otherwise make a geometry-dependent lab-frame transformation before each
+    energy or gradient evaluation.
+    """
+    return (
+        f"{int(charge)} {int(multiplicity)}\n"
+        "units angstrom\n"
+        "no_com\n"
+        "no_reorient\n"
+        f"{xyz}"
+    )
 
 
 def configure_psi4_runtime(psi4, qcinput):
@@ -52,7 +70,7 @@ def Psi4_Energy(filename, q, atoms, qcinput):
     wfu          = qcinput.get("wfu", False)
 
     xyz = makeXYZ(atoms, q)
-    mol = psi4.geometry(f"""{charge} {multiplicity}\n{xyz}""")
+    mol = psi4.geometry(psi4_geometry_specification(charge, multiplicity, xyz))
 
     psi4.set_num_threads(nproc)
 
@@ -147,7 +165,7 @@ def Psi4_Force(q, atoms, qcinput):
     additional   = qcinput.get("additional", "")
 
     xyz = makeXYZ(atoms, q)
-    mol = psi4.geometry(f"""{charge} {multiplicity}\n{xyz}""")
+    mol = psi4.geometry(psi4_geometry_specification(charge, multiplicity, xyz))
 
     psi4.set_num_threads(nproc)
 
@@ -222,28 +240,11 @@ def Psi4_Force(q, atoms, qcinput):
 
 
 def Psi4_Hessian(q, atoms, qcinput):
-    '''
-    Numerical hessian from Psi4 by calling analytical gradient
-    '''
-
-    dx = 0.002
-    ndim = len(q)
-    hess = np.zeros((ndim, ndim))
-
-    for i in range(ndim):
-        q[i] += dx
-
-        gradp1 = -Psi4_Force(q, atoms, qcinput) #these are forces not gradient, so minus sign needed
-
-        q[i] -= 2.0*dx
-
-        gradm1 = -Psi4_Force(q, atoms, qcinput) #these are forces not gradient, so minus sign needed
-
-        hess[i,:] = 0.5 * (gradp1 - gradm1) / dx
-
-        q[i] += dx #restore partial coordinate
-
-    return hess
+    return central_difference_hessian(
+        q,
+        lambda coordinates: -Psi4_Force(coordinates, atoms, qcinput),
+        dx=qcinput.get("hessian_dx", 0.002),
+    )
 
 def parseXYZ(xyz):
     # Split the XYZ string into lines

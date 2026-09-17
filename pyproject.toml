@@ -13,7 +13,8 @@ authors = [
     { name = "Peter Szabo", email = "peter88szabo@gmail.com" }
 ]
 dependencies = [
-    "numpy>=1.21.0"
+    "numpy>=1.21.0",
+    "scipy>=1.8.0"
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -56,6 +57,7 @@ include = [
     "normalmode*",
     "optimizer*",
     "parallel*",
+    "photoionization*",
     "qchem_interfaces*",
     "sampling*",
     "smite_gui*",

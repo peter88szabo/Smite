@@ -3,6 +3,8 @@ import os
 
 import numpy as np
 
+from qchem_interfaces.numerical_hessian import central_difference_hessian
+
 
 _CALCULATORS = {}
 
@@ -127,18 +129,8 @@ def PES_Hessian(q, atoms, qcinput):
             raise ValueError(f"PES hessian shape {hess.shape} does not match expected {(ndim, ndim)}")
         return hess
 
-    dx = qcinput.get("hessian_dx", 0.002)
-    ndim = len(q)
-    hess = np.zeros((ndim, ndim), dtype=float)
-
-    for i in range(ndim):
-        q[i] += dx
-        gradp1 = -PES_Force(q, atoms, qcinput)
-
-        q[i] -= 2.0 * dx
-        gradm1 = -PES_Force(q, atoms, qcinput)
-
-        hess[i, :] = 0.5 * (gradp1 - gradm1) / dx
-        q[i] += dx
-
-    return hess
+    return central_difference_hessian(
+        q,
+        lambda coordinates: -PES_Force(coordinates, atoms, qcinput),
+        dx=qcinput.get("hessian_dx", 0.002),
+    )

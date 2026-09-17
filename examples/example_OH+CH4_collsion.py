@@ -20,6 +20,9 @@ if __name__ == "__main__":
         "pes_path": str(pes_dir),
         "wfu": False,
         "hessian_dx": 0.002,
+        # The atom ordering after Collision(CH4, OH) is C/H4/O/H(OH).
+        # Keep this identity fixed throughout H abstraction.
+        "oh_h_index": 6,
     }
 
     seed = 2222029

@@ -1,3 +1,6 @@
+import numpy as np
+
+
 SUPPORTED_QCHEM = {
     "XTB",
     "Orca",
@@ -36,13 +39,19 @@ COMMON_OPTIONAL_KEYS = {
     "_last_energy_cache",
     "_qchem_validated",
     "backend_retry_after_cleanup",
+    "force_hessian_recalc",
     "hessian_dx",
     "hessian_keyword",
     "orca_hessian_keyword",
     "pes_name",
     "pes_path",
+    "quiet_hessian",
+    "oh_h_index",
+    "oh_h_atom_index",
     "retry_after_cleanup",
     "scf_guess_mode",
+    "save_hessian",
+    "scratch_dir",
     "spin_multiplicities",
     "spin_mults",
     "spinmulti2",
@@ -113,6 +122,14 @@ def validate_qchem_input(qcinput, *, require_path=True, strict=False, allowed_ex
 
     if normalized.get("additional") is None:
         normalized["additional"] = ""
+
+    if "hessian_dx" in normalized:
+        try:
+            normalized["hessian_dx"] = float(normalized["hessian_dx"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("qchem key 'hessian_dx' must be a finite positive number") from exc
+        if not np.isfinite(normalized["hessian_dx"]) or normalized["hessian_dx"] <= 0.0:
+            raise ValueError("qchem key 'hessian_dx' must be a finite positive number")
 
     if require_path and qchem in PATH_REQUIRED and not normalized.get("path"):
         raise ValueError(f"{qchem} requires qchem key 'path' with the executable path")

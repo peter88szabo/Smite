@@ -559,6 +559,41 @@ def _ts_converged(energy_change, step, grad, *, energy_tol, max_gradient, rms_gr
         and step_rms <= rms_step
     )
 
+
+def _ts_trial_is_acceptable(rho, grad, trial_grad, *, min_gradient_improvement=0.0):
+    """Require a finite, model-consistent TS step before accepting it.
+
+    A saddle search is not an energy minimization, therefore an uphill energy
+    change can be correct.  The quadratic-model ratio must nevertheless have
+    the same sign and be appreciable.  An optional positive
+    ``min_gradient_improvement`` is interpreted as a fractional reduction in
+    the projected-gradient norm.
+    """
+    if not np.isfinite(rho) or rho < 5.0e-2:
+        return False
+    if not np.all(np.isfinite(trial_grad)):
+        return False
+    improvement = float(min_gradient_improvement)
+    if improvement <= 0.0:
+        return True
+    if improvement >= 1.0:
+        raise ValueError("min_gradient_improvement must be smaller than 1")
+    current_norm = float(np.linalg.norm(grad))
+    trial_norm = float(np.linalg.norm(trial_grad))
+    return trial_norm <= (1.0 - improvement) * current_norm
+
+
+def _update_ts_trust_radius(trust_radius, step, rho, *, trust_radius_min, trust_radius_max):
+    """Update a TS trust radius from an accepted quadratic-model ratio."""
+    radius = float(trust_radius)
+    lower = float(trust_radius_min)
+    upper = float(trust_radius_max)
+    if rho < 0.25:
+        return max(lower, 0.5 * radius)
+    if rho > 0.75 and float(np.linalg.norm(step)) >= 0.8 * radius:
+        return min(upper, 2.0 * radius)
+    return min(upper, max(lower, radius))
+
 def _near_ts_convergence_for_recalc(
     step,
     grad,
@@ -758,7 +793,6 @@ def _ts_accept_step(
     project_eckart=True,
     min_gradient_improvement=0.0,
 ):
-    del min_gradient_improvement
     trial_q = q + step
     trial_energy = _energy(qcinput, trial_q, atoms)
     trial_grad = _gradient(qcinput, trial_q, atoms)
@@ -768,7 +802,10 @@ def _ts_accept_step(
     pred = float(np.dot(grad, step) + 0.5 * np.dot(step, hess @ step))
     actual = trial_energy - energy
     rho = actual / pred if abs(pred) > 1.0e-14 else np.nan
-    return trial_q, trial_energy, trial_grad, step, rho
+    accepted = _ts_trial_is_acceptable(
+        rho, grad, trial_grad, min_gradient_improvement=min_gradient_improvement
+    )
+    return trial_q, trial_energy, trial_grad, step, rho, accepted
 
 def _smite_cartesian_ts_optimize_geometry(
     qcinput,
@@ -817,8 +854,14 @@ def _smite_cartesian_ts_optimize_geometry(
     hess = _exact_cartesian_hessian(qcinput, atoms, q, hess_file)
     grad, hess = _maybe_project_ts_derivatives(atoms, q, grad=grad, hess=hess, project_eckart=project_eckart)
     reaction_mode = None
-    reaction_mode_is_lowest = False
     negative_modes = None
+    trust_radius = float(trust_radius)
+    trust_radius_min = float(trust_radius_min)
+    trust_radius_max = float(trust_radius_max)
+    if trust_radius_min <= 0.0 or trust_radius_max < trust_radius_min:
+        raise ValueError("Invalid TS trust-radius bounds")
+    trust_radius = min(trust_radius_max, max(trust_radius_min, trust_radius))
+    max_rejected_steps = max(0, int(max_rejected_steps))
     initial_trust_radius = trust_radius
     previous_negative_modes = None
     adaptive_recalc_next_reason = None
@@ -866,28 +909,48 @@ def _smite_cartesian_ts_optimize_geometry(
                 last_hessian_recalc_step = istep - 1
                 adaptive_recalc_next_reason = None
 
-            step, trial_mode, _mode_idx, _evals, trial_negative_modes, _tracking_mode, mode_diag = _partitioned_rfo_step(
-                hess,
-                grad,
-                previous_mode=None if reaction_mode_is_lowest else reaction_mode,
-                reaction_direction=reaction_direction if reaction_mode is None and not reaction_mode_is_lowest else None,
-                follow_lowest=reaction_mode_is_lowest,
-                trust_radius=trust_radius,
-            )
-            trial_q, trial_energy, trial_grad, used_step, rho = _ts_accept_step(
-                qcinput,
-                atoms,
-                q,
-                energy,
-                grad,
-                hess,
-                step,
-                project_eckart=project_eckart,
-                min_gradient_improvement=min_gradient_improvement,
-            )
+            accepted = False
+            rejection_count = 0
+            while rejection_count <= max_rejected_steps:
+                step, trial_mode, _mode_idx, _evals, trial_negative_modes, _tracking_mode, mode_diag = _partitioned_rfo_step(
+                    hess,
+                    grad,
+                    previous_mode=reaction_mode,
+                    reaction_direction=reaction_direction if reaction_mode is None else None,
+                    trust_radius=trust_radius,
+                )
+                trial_q, trial_energy, trial_grad, used_step, rho, accepted = _ts_accept_step(
+                    qcinput,
+                    atoms,
+                    q,
+                    energy,
+                    grad,
+                    hess,
+                    step,
+                    project_eckart=project_eckart,
+                    min_gradient_improvement=min_gradient_improvement,
+                )
+                if accepted:
+                    trust_radius = _update_ts_trust_radius(
+                        trust_radius, used_step, rho,
+                        trust_radius_min=trust_radius_min, trust_radius_max=trust_radius_max,
+                    )
+                    break
+                rejection_count += 1
+                if trust_radius <= trust_radius_min:
+                    break
+                trust_radius = max(trust_radius_min, 0.25 * trust_radius)
+            if not accepted:
+                message = "TS trust-region step rejected; model agreement did not recover"
+                if print_report:
+                    _print_optimization_status(False, message)
+                return OptimizationResult(
+                    atoms=atoms, q=q, energy=energy, converged=False, nsteps=istep - 1,
+                    method="P-RFO", backend_optimizer="smite", trajectory_file=trajectory_file,
+                    gradient=grad, message=message, coordinates="cartesian",
+                    target="transition_state", negative_modes=negative_modes, reaction_mode=reaction_mode,
+                )
             reaction_mode = trial_mode
-            if _mode_idx == int(np.argmin(_evals)):
-                reaction_mode_is_lowest = True
             negative_modes = trial_negative_modes
 
             energy_change = trial_energy - energy
@@ -944,25 +1007,31 @@ def _smite_cartesian_ts_optimize_geometry(
                         project_eckart=project_eckart,
                     )
                     result_negative_modes = _count_negative_modes(result_hess)
+                if result_negative_modes == 1:
+                    if print_report:
+                        _print_optimization_status(True, "Transition-state convergence reached.")
+                    return OptimizationResult(
+                        atoms=atoms,
+                        q=trial_q,
+                        energy=trial_energy,
+                        converged=True,
+                        nsteps=istep,
+                        method="P-RFO",
+                        backend_optimizer="smite",
+                        trajectory_file=trajectory_file,
+                        gradient=trial_grad,
+                        message="Transition-state convergence reached.",
+                        coordinates="cartesian",
+                        target="transition_state",
+                        negative_modes=result_negative_modes,
+                        reaction_mode=reaction_mode,
+                        hessian=result_hess,
+                    )
                 if print_report:
-                    _print_optimization_status(True, "Transition-state convergence reached.")
-                return OptimizationResult(
-                    atoms=atoms,
-                    q=trial_q,
-                    energy=trial_energy,
-                    converged=True,
-                    nsteps=istep,
-                    method="P-RFO",
-                    backend_optimizer="smite",
-                    trajectory_file=trajectory_file,
-                    gradient=trial_grad,
-                    message="Transition-state convergence reached.",
-                    coordinates="cartesian",
-                    target="transition_state",
-                    negative_modes=result_negative_modes,
-                    reaction_mode=reaction_mode,
-                    hessian=result_hess,
-                )
+                    print(
+                        "      TS geometric criteria met, but the Hessian has "
+                        f"{result_negative_modes} imaginary modes; continuing."
+                    )
 
             y = trial_grad - grad
             hess, updated = _bofill_update_hessian(hess, used_step, y)
@@ -1014,7 +1083,6 @@ def _ts_accept_internal_step(
     cartesian_step_max=None,
     use_redundant_internals=False,
 ):
-    del min_gradient_improvement
     q = np.asarray(q, dtype=float).reshape(-1)
     dq = np.asarray(dq, dtype=float).reshape(-1)
     scale = 1.0
@@ -1050,7 +1118,13 @@ def _ts_accept_internal_step(
         use_redundant_internals=use_redundant_internals,
     )
     trial_grad_q = internal_gradient(trial_bpg, trial_grad_x)
-    return trial_q, trial_energy, trial_grad_x, trial_grad_q, trial_bpg, trial_q - q, rho, accepted_dq
+    accepted = _ts_trial_is_acceptable(
+        rho, grad_q, trial_grad_q, min_gradient_improvement=min_gradient_improvement
+    )
+    return (
+        trial_q, trial_energy, trial_grad_x, trial_grad_q, trial_bpg,
+        trial_q - q, rho, accepted_dq, accepted,
+    )
 
 def _smite_internal_ts_optimize_geometry(
     qcinput,
@@ -1120,11 +1194,6 @@ def _smite_internal_ts_optimize_geometry(
     mode_tracking_coordinates = str(mode_tracking_coordinates).lower()
     if mode_tracking_coordinates not in {"internal", "mass_weighted_cartesian"}:
         raise ValueError("mode_tracking_coordinates must be 'internal' or 'mass_weighted_cartesian'")
-    # Baker EF/P-RFO uses the Hessian in the coordinates being optimized.  The
-    # finite-difference primitive-coordinate correction below is not part of
-    # that algorithm and can disturb the followed Hessian mode.
-    internal_hessian_correction = False
-
     model = default_connectivity_model(
         atoms,
         kcn=connectivity_kcn,
@@ -1175,8 +1244,14 @@ def _smite_internal_ts_optimize_geometry(
         hess_q = _internal_hessian_from_cartesian(hess_x, bpg)
     reaction_mode = None
     reaction_tracking_mode = None
-    reaction_mode_is_lowest = False
     negative_modes = None
+    trust_radius = float(trust_radius)
+    trust_radius_min = float(trust_radius_min)
+    trust_radius_max = float(trust_radius_max)
+    if trust_radius_min <= 0.0 or trust_radius_max < trust_radius_min:
+        raise ValueError("Invalid TS trust-radius bounds")
+    trust_radius = min(trust_radius_max, max(trust_radius_min, trust_radius))
+    max_rejected_steps = max(0, int(max_rejected_steps))
     initial_trust_radius = trust_radius
     previous_negative_modes = None
     adaptive_recalc_next_reason = None
@@ -1296,48 +1371,71 @@ def _smite_internal_ts_optimize_geometry(
                 last_hessian_recalc_step = istep - 1
                 adaptive_recalc_next_reason = None
 
-            tracking_vectors = None
-            if mode_tracking_coordinates == "mass_weighted_cartesian":
-                trial_evals, trial_evecs = np.linalg.eigh(0.5 * (hess_q + hess_q.T))
-                tracking_vectors = _mass_weighted_cartesian_modes_from_internal(trial_evecs, bpg, atoms)
-                del trial_evals, trial_evecs
-            dq, trial_mode, _mode_idx, _evals, trial_negative_modes, trial_tracking_mode, mode_diag = _partitioned_rfo_step(
-                hess_q,
-                grad_q,
-                previous_mode=reaction_mode,
-                reaction_direction=reaction_direction if reaction_mode is None and not reaction_mode_is_lowest else None,
-                tracking_vectors=tracking_vectors,
-                previous_tracking_mode=reaction_tracking_mode,
-                reaction_tracking_direction=(
-                    reaction_tracking_direction if reaction_tracking_mode is None and not reaction_mode_is_lowest else None
-                ),
-                follow_lowest=reaction_mode_is_lowest,
-                trust_radius=trust_radius,
-                repair_hessian=repair_ts_hessian,
-                hessian_eigenvalue_floor=ts_hessian_eigenvalue_floor,
-            )
-            trial_q, trial_energy, trial_grad_x, trial_grad_q, trial_bpg, cart_step, rho, accepted_dq = _ts_accept_internal_step(
-                qcinput,
-                atoms,
-                q,
-                energy,
-                grad_q,
-                hess_q,
-                dq,
-                qs,
-                ic,
-                bpg,
-                best_fit_iters,
-                best_fit_rms_tol=best_fit_rms_tol,
-                project_eckart=project_eckart,
-                min_gradient_improvement=min_gradient_improvement,
-                cartesian_step_max=trust_radius,
-                use_redundant_internals=use_redundant_internals,
-            )
+            accepted = False
+            rejection_count = 0
+            while rejection_count <= max_rejected_steps:
+                tracking_vectors = None
+                if mode_tracking_coordinates == "mass_weighted_cartesian":
+                    trial_evals, trial_evecs = np.linalg.eigh(0.5 * (hess_q + hess_q.T))
+                    tracking_vectors = _mass_weighted_cartesian_modes_from_internal(trial_evecs, bpg, atoms)
+                    del trial_evals, trial_evecs
+                dq, trial_mode, _mode_idx, _evals, trial_negative_modes, trial_tracking_mode, mode_diag = _partitioned_rfo_step(
+                    hess_q,
+                    grad_q,
+                    previous_mode=reaction_mode,
+                    reaction_direction=reaction_direction if reaction_mode is None else None,
+                    tracking_vectors=tracking_vectors,
+                    previous_tracking_mode=reaction_tracking_mode,
+                    reaction_tracking_direction=(
+                        reaction_tracking_direction if reaction_tracking_mode is None else None
+                    ),
+                    trust_radius=trust_radius,
+                    repair_hessian=repair_ts_hessian,
+                    hessian_eigenvalue_floor=ts_hessian_eigenvalue_floor,
+                )
+                (
+                    trial_q, trial_energy, trial_grad_x, trial_grad_q, trial_bpg,
+                    cart_step, rho, accepted_dq, accepted,
+                ) = _ts_accept_internal_step(
+                    qcinput,
+                    atoms,
+                    q,
+                    energy,
+                    grad_q,
+                    hess_q,
+                    dq,
+                    qs,
+                    ic,
+                    bpg,
+                    best_fit_iters,
+                    best_fit_rms_tol=best_fit_rms_tol,
+                    project_eckart=project_eckart,
+                    min_gradient_improvement=min_gradient_improvement,
+                    cartesian_step_max=trust_radius,
+                    use_redundant_internals=use_redundant_internals,
+                )
+                if accepted:
+                    trust_radius = _update_ts_trust_radius(
+                        trust_radius, cart_step, rho,
+                        trust_radius_min=trust_radius_min, trust_radius_max=trust_radius_max,
+                    )
+                    break
+                rejection_count += 1
+                if trust_radius <= trust_radius_min:
+                    break
+                trust_radius = max(trust_radius_min, 0.25 * trust_radius)
+            if not accepted:
+                message = "TS trust-region step rejected; model agreement did not recover"
+                if print_report:
+                    _print_optimization_status(False, message)
+                return OptimizationResult(
+                    atoms=atoms, q=q, energy=energy, converged=False, nsteps=istep - 1,
+                    method="P-RFO", backend_optimizer="smite", trajectory_file=trajectory_file,
+                    gradient=grad_x, message=message, coordinates="internal",
+                    target="transition_state", negative_modes=negative_modes, reaction_mode=reaction_mode,
+                )
             reaction_mode = trial_mode
             reaction_tracking_mode = trial_tracking_mode
-            if _mode_idx == int(np.argmin(_evals)):
-                reaction_mode_is_lowest = True
             negative_modes = trial_negative_modes
 
             energy_change = trial_energy - energy
@@ -1407,25 +1505,31 @@ def _smite_internal_ts_optimize_geometry(
                     else:
                         result_hess_q = _internal_hessian_from_cartesian(result_hess, trial_bpg)
                     result_negative_modes = _count_negative_modes(result_hess_q)
+                if result_negative_modes == 1:
+                    if print_report:
+                        _print_optimization_status(True, "Transition-state convergence reached.")
+                    return OptimizationResult(
+                        atoms=atoms,
+                        q=trial_q,
+                        energy=trial_energy,
+                        converged=True,
+                        nsteps=istep,
+                        method="P-RFO",
+                        backend_optimizer="smite",
+                        trajectory_file=trajectory_file,
+                        gradient=trial_grad_x,
+                        message="Transition-state convergence reached.",
+                        coordinates="internal",
+                        target="transition_state",
+                        negative_modes=result_negative_modes,
+                        reaction_mode=reaction_mode,
+                        hessian=result_hess,
+                    )
                 if print_report:
-                    _print_optimization_status(True, "Transition-state convergence reached.")
-                return OptimizationResult(
-                    atoms=atoms,
-                    q=trial_q,
-                    energy=trial_energy,
-                    converged=True,
-                    nsteps=istep,
-                    method="P-RFO",
-                    backend_optimizer="smite",
-                    trajectory_file=trajectory_file,
-                    gradient=trial_grad_x,
-                    message="Transition-state convergence reached.",
-                    coordinates="internal",
-                    target="transition_state",
-                    negative_modes=result_negative_modes,
-                    reaction_mode=reaction_mode,
-                    hessian=result_hess,
-                )
+                    print(
+                        "      TS geometric criteria met, but the Hessian has "
+                        f"{result_negative_modes} imaginary modes; continuing."
+                    )
 
             y = trial_grad_q - grad_q
             hess_q, _updated = _bofill_update_hessian(hess_q, accepted_dq, y)

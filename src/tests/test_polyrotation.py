@@ -66,6 +66,29 @@ def test_fixed_J_sampling_realizes_requested_cartesian_angular_momentum():
     )
 
 
+def test_fixed_J_sampling_for_linear_polyatomic_has_no_axis_component():
+    # Three collinear atoms form a linear *polyatomic* rotor.  Its molecular
+    # axis has zero inertia and therefore cannot carry rigid-body angular
+    # momentum in Cartesian coordinates.
+    mass = np.array([1.0, 16.0, 1.0]) * 1822.888486
+    q = np.array([0.0, 0.0, -2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0])
+    p = np.zeros_like(q)
+    jrot = 5
+    random.seed(23)
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        sampled_p, target_angmom, principal_moments = polyatom_rotation_sampling(
+            {0: ("Q", jrot)}, mass, q.copy(), p.copy()
+        )
+
+    axis = np.array([0.0, 0.0, 1.0])
+    actual_angmom = np.asarray(angular_momentum(q, sampled_p))
+    assert principal_moments[0] < 1.0e-10 * principal_moments[-1]
+    assert abs(float(np.dot(target_angmom, axis))) < 1.0e-12
+    np.testing.assert_allclose(actual_angmom, target_angmom, rtol=1.0e-10, atol=1.0e-10)
+    np.testing.assert_allclose(np.linalg.norm(target_angmom), math.sqrt(jrot * (jrot + 1.0)))
+
+
 def test_thermal_sampling_realizes_requested_cartesian_angular_momentum():
     q, p, mass = _skew_system()
     random.seed(91)

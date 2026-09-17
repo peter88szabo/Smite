@@ -35,25 +35,62 @@ def thermal_vibr_mode(RT,ome):
 #====================================================
 
 #====================================================
-def thermal_rot_quantum_spherical_top(RT,Inertia):
-#----------------------------------------------------
-#   it's useful for spherical top or diatomic cases
-#
-#   for diatomic molecule:
-#   Inertia = redmass*re*re
-#
-#   jrot here is the rotational quantum number
-#----------------------------------------------------
-    rand = random.uniform(0,1)
+def thermal_rot_quantum_spherical_top(RT, Inertia, tail_tolerance=1.0e-12):
+    """Sample an exact canonical rotational quantum number for a diatomic rotor.
 
-    alp = np.log(1.0-rand)*2.0*Inertia*RT
+    The discrete rigid-rotor population is
 
-    roty = 0.5*(np.sqrt(1.0-4.0*alp)-1.0)
+    ``P(J) ∝ (2J + 1) exp[-J(J + 1) / (2 I RT)]``.
 
-#   diatomic rotational quantum number:
-    jrot = int(round(roty))
+    The previous implementation sampled a continuous approximation and rounded
+    it, which biases low-J populations.  We instead construct the normalized
+    discrete distribution until its remaining tail is negligible, then draw
+    from its cumulative weights.  ``Inertia`` and ``RT`` are in atomic units.
+    """
+    RT = float(RT)
+    Inertia = float(Inertia)
+    tail_tolerance = float(tail_tolerance)
+    if not np.isfinite(RT) or RT < 0.0:
+        raise ValueError("RT must be finite and non-negative")
+    if not np.isfinite(Inertia) or Inertia <= 0.0:
+        raise ValueError("Inertia must be finite and positive for quantum rotational sampling")
+    if not 0.0 < tail_tolerance < 1.0:
+        raise ValueError("tail_tolerance must lie between 0 and 1")
+    if RT == 0.0:
+        return 0
 
-    return jrot
+    inertia_temperature = Inertia * RT
+    weights = [1.0]
+    total = 1.0
+    jrot = 0
+    while True:
+        # w(J+1)/w(J), obtained directly from the degeneracy-weighted
+        # canonical probability to avoid evaluating large exponentials.
+        ratio = ((2.0 * jrot + 3.0) / (2.0 * jrot + 1.0)) * math.exp(
+            -(jrot + 1.0) / inertia_temperature
+        )
+        next_weight = weights[-1] * ratio
+        weights.append(next_weight)
+        total += next_weight
+        jrot += 1
+
+        # The ratios decrease after the distribution mode.  Bound the
+        # unrepresented geometric tail before stopping.
+        next_ratio = ((2.0 * jrot + 3.0) / (2.0 * jrot + 1.0)) * math.exp(
+            -(jrot + 1.0) / inertia_temperature
+        )
+        if next_ratio < 1.0:
+            tail_bound = next_weight * next_ratio / (1.0 - next_ratio)
+            if tail_bound <= tail_tolerance * total:
+                break
+
+    threshold = random.random() * total
+    cumulative = 0.0
+    for jrot, weight in enumerate(weights):
+        cumulative += weight
+        if threshold < cumulative:
+            return jrot
+    return len(weights) - 1  # protects against roundoff at the CDF endpoint
 #====================================================
 
 

@@ -6,32 +6,16 @@ import shutil
 from utils.constants import BOHR_TO_ANGSTROM
 from qchem_interfaces.backend_common import backend_scratch_dir, command_error
 from qchem_interfaces.energy_cache import store_energy
+from qchem_interfaces.numerical_hessian import central_difference_hessian
 from qchem_interfaces.wavefunction_output import prepare_wavefunction_output, require_wavefunction_file
 
 
 def Sparrowbin_Hessian(q, atoms, qcinput):
-    '''
-    Numerical hessian from Sparrow by calling analytical gradient
-    '''
-
-    dx = 0.002
-    ndim = len(q)
-    hess = np.zeros((ndim, ndim))
-
-    for i in range(ndim):
-        q[i] += dx
-
-        gradp1 = -Sparrowbin_Force(q, atoms, qcinput) #negative sign because it's force not gradient
-
-        q[i] -= 2.0*dx
-
-        gradm1 = -Sparrowbin_Force(q, atoms, qcinput) #negative sign because it's force not gradient
-
-        hess[i,:] = 0.5 * (gradp1 - gradm1) / dx
-
-        q[i] += dx #restore partial coordinate
-
-    return hess
+    return central_difference_hessian(
+        q,
+        lambda coordinates: -Sparrowbin_Force(coordinates, atoms, qcinput),
+        dx=qcinput.get("hessian_dx", 0.002),
+    )
 
 
 def Sparrowbin_Force(q, atoms, qcinput):
