@@ -32,7 +32,13 @@ analysis = ["matplotlib"]
 pyscf = ["pyscf"]
 sparrow = ["scine-sparrow"]
 gui = ["PySide6"]
+# Machine-learned surfaces (peslib/H2O+Kr+) and the surface-hopping runs on them.
+# scikit-learn is only needed by qchem_interfaces/gp_models.py, not by the
+# peslib interface itself.
+mlpes = ["torch", "scikit-learn"]
 dev = ["build", "pytest"]
+# "all" deliberately excludes mlpes: PyTorch is a heavy download and is only
+# needed for the machine-learned surfaces. Always request it explicitly.
 all = ["matplotlib", "pyscf", "scine-sparrow", "PySide6"]
 
 [project.scripts]

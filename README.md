@@ -1,6 +1,6 @@
 # Smite
 
-Smite is a Python toolkit for quasiclassical trajectory calculations for molecular collisions and unimolecular dynamics. It supports constant-energy NVE trajectories, thermalized NVT trajectories, analytical potential energy surfaces, and ab initio molecular dynamics where the forces are evaluated by external quantum chemistry backends.
+Smite is a Python toolkit for quasiclassical trajectory calculations for molecular collisions and unimolecular dynamics. It supports constant-energy NVE trajectories, thermalized NVT trajectories, analytical and machine-learned potential energy surfaces, ab initio molecular dynamics where the forces are evaluated by external quantum chemistry backends, and nonadiabatic dynamics on coupled electronic states. Alongside trajectories it provides geometry optimization, transition-state and IRC following, coordinate scans, and vibrational and thermochemical analysis.
 
 The public import surface is kept intentionally simple:
 
@@ -12,10 +12,16 @@ from smite import Molecule, Fragment, Collision, Photoionization
 
 - Molecular collision and unimolecular trajectory simulations.
 - NVE dynamics and NVT dynamics through thermostats such as Nose-Hoover and GLE colored-noise thermostat support.
-- Analytical PES calculations through `peslib/` and the PES interface.
+- Analytical and machine-learned PES calculations through `peslib/` and the PES interface.
 - Ab initio MD force and energy calls through interfaces such as XTB, ORCA, Psi4, PySCF, SCINE Sparrow, Molpro, and PES-backed calculations.
+- Nonadiabatic dynamics by fewest-switches surface hopping on coupled electronic states.
+- Photoionization initial conditions for TPEPICO-style experiments.
 - Initial condition sampling for translational, rotational, vibrational, thermal, and normal-mode based setups.
-- Analysis helpers for vibrational spectra and scattering form factors.
+- Rigid-fragment propagation with SHAKE/RATTLE constraints and reversible rigid-body drift.
+- Geometry optimization, transition-state searches, IRC following, minimum-energy crossing points, and relaxed one- and two-dimensional coordinate scans.
+- Vibrational frequency analysis and thermochemistry, including Grimme quasi-RRHO entropies.
+- Analysis helpers for vibrational spectra, time-resolved spectra, energy partitioning, and scattering form factors.
+- Independent parallel trajectory scheduling, restartable runs, and a `smite-gui` graphical input builder.
 
 ## Photoionization initial conditions
 
@@ -40,6 +46,76 @@ in every combination. Energies are eV; `ionic_energy` means binding energy
 See the [complete photoionization input](examples/example_photoionization.py)
 and [usage guide](src/photoionization/README.md) for both input paths, energy
 conventions, neutral mode sampling, and ionic dynamics.
+
+## Nonadiabatic dynamics (surface hopping)
+
+Trajectories can propagate on more than one electronic state using Tully's
+fewest-switches surface hopping, with Baeck-An nonadiabatic couplings obtained
+from the adiabatic energy gap. Pass `q_integrator="fssh"` to `run_trajectory`
+together with one `qcinput` per electronic state, lowest state first:
+
+```python
+states = [
+    {"qchem": "PES", "pes_name": "H2O+Kr+", "state": 0},
+    {"qchem": "PES", "pes_name": "H2O+Kr+", "state": 1},
+]
+
+molecule.run_trajectory(
+    integrator="verlet",
+    timestep=0.25,
+    q_integrator="fssh",
+    num_states=2,
+    active_state=1,
+    state_qcinput=states,
+    dtq=0.025,
+    de_cutoff=0.5,
+    Rstop=50.0,
+)
+```
+
+- `state_qcinput` must list exactly `num_states` entries. Its order defines the
+  state indices and is never re-sorted by energy, because the hop probabilities
+  are indexed by it.
+- `dtq` is the quantum timestep, in the same unit as `timestep`, defaulting to
+  `timestep / 10`. The electronic amplitudes advance `timestep / dtq` times per
+  classical step.
+- `de_cutoff` is the adiabatic energy gap in Hartree below which couplings are
+  evaluated. Above it the per-state gradients and Hessians are skipped.
+- After a hop the surface-selecting keys are merged into `molecule.qchem`, so
+  the classical force follows the new state. `molecule.active_state` holds the
+  current state throughout the run.
+
+The quantum step runs after the classical step and the thermostat and acts on
+the momenta only. With the default `q_integrator=None` the propagation is
+identical to an ordinary single-surface trajectory.
+
+## Potential energy surface library
+
+`peslib/` holds ready-to-use surfaces, selected with `{"qchem": "PES",
+"pes_name": ...}` or by pointing `pes_path` at any directory:
+
+| Directory | System | Notes |
+| --- | --- | --- |
+| `ArH2+` | Ar + H2(+) | |
+| `Cl+CH4` | Cl + CH4 | analytic Hessian |
+| `F+H2` | F + H2 | |
+| `HO2_1Deltag` | HO2, O2(1-Delta-g) channel | Fortran, build with `make` |
+| `HO2_3Sigma_negative` | HO2, O2(3-Sigma-minus) channel | Fortran, build with `make` |
+| `OH+CH4` | OH + CH4 | analytic Hessian |
+| `H2O+Kr+` | H2O + Kr(+), two electronic states | machine-learned, needs the `mlpes` extra |
+
+Each directory provides a `pes_interface.py` defining a `PESCalculator`
+constructed as `PESCalculator(pes_dir, config)`, where `config` is the `qcinput`
+dictionary. It must define `energy(q, atoms)` and either `force(q, atoms)` or
+`gradient(q, atoms)`. An optional `hessian(q, atoms)` is used when present and
+otherwise obtained by central differences. Coordinates are flat Cartesian arrays
+in bohr and energies are in Hartree.
+
+The `H2O+Kr+` surfaces are machine-learned Gaussian-process models, one
+TorchScript file per electronic state, and are what the surface-hopping example
+above runs on. Their interface also exposes `variance(q, atoms)`, the GP
+variance, which grows sharply once a trajectory leaves the training region and
+is worth monitoring on long runs.
 
 ## Scientific parameter conventions
 
@@ -85,11 +161,51 @@ pip install -e .
 
 Optional extras:
 
+| Extra | Pulls in | Needed for |
+| --- | --- | --- |
+| `analysis` | matplotlib | plots produced by the analysis and scan helpers |
+| `pyscf` | pyscf | the PySCF force backend |
+| `sparrow` | scine-sparrow | the SCINE Sparrow force backend |
+| `gui` | PySide6 | the `smite-gui` input builder |
+| `mlpes` | torch, scikit-learn | the machine-learned surfaces in `peslib/H2O+Kr+` |
+| `dev` | build, pytest | running the test suite and building distributions |
+| `all` | matplotlib, pyscf, scine-sparrow, PySide6 | everything except `mlpes` |
+
 ```bash
 pip install -e ".[analysis]"
-pip install -e ".[pyscf]"
-pip install -e ".[sparrow]"
+pip install -e ".[mlpes]"
 pip install -e ".[all]"
+```
+
+### Why `mlpes` is not in `all`
+
+`all` deliberately leaves out `mlpes`. PyTorch is a large download, on the order
+of a few hundred megabytes, and nothing outside `peslib/H2O+Kr+` uses it: the
+whole classical quasiclassical-trajectory side of Smite, every ab initio
+backend, the analytic Fortran surfaces, the optimizers, and the thermochemistry
+all run without it. Folding it into `all` would impose that cost on everyone who
+just wants ordinary QCT runs, so PyTorch is always requested explicitly:
+
+```bash
+pip install -e ".[all,mlpes]"
+```
+
+Nothing imports PyTorch at module load, so a Smite installed without `mlpes`
+behaves normally; only constructing the `H2O+Kr+` calculator raises, and the
+tests covering it skip themselves. There is no GPU requirement either -- the
+models are small and a CPU-only build is enough:
+
+```bash
+pip install --index-url https://download.pytorch.org/whl/cpu torch
+```
+
+`scikit-learn` comes along with `mlpes` because `qchem_interfaces/gp_models.py`
+imports it; the `peslib/H2O+Kr+` interface itself needs only PyTorch and NumPy.
+
+The graphical input builder is installed as a console script:
+
+```bash
+smite-gui
 ```
 
 The package name is `smite`.
@@ -241,6 +357,35 @@ for stable timesteps. The method follows
 Large groups retain an O(N) diagnostic constraint set. Mass-weighted fitting is
 used to project the starting geometry, rather than to approximate free drift.
 
+## Geometry optimization, transition states, IRC, and scans
+
+`molecule.optimize_geometry(...)` relaxes the current structure in place. The
+`optimizer` package drives the same `qcinput` backends for standalone work:
+
+- `optimize_geometry` minimum searches, in internal coordinates by default or
+  in Cartesians with `coordinates="cartesian"`, with trust-radius control,
+  optional Hessian recalculation, and an optional closing frequency analysis.
+- `optimize_transition_state` first-order saddle point searches.
+- `follow_irc` intrinsic reaction coordinate following from a transition state
+  in mass-weighted coordinates, writing the path and energy profile and
+  optionally relaxing and comparing both endpoints.
+- `optimize_spin_crossing` minimum-energy crossing points between two spin
+  multiplicities.
+- `scan_bond`, `scan_angle`, `scan_dihedral`, `scan_coordinate`,
+  `scan_coordinate_2d`, `scan_normal_mode`, and `scan_xyz_file` for relaxed and
+  rigid scans, including two-dimensional grids and displacement along a normal
+  mode.
+
+## Vibrational analysis and thermochemistry
+
+`frequency_analysis(...)` builds or reads a Hessian, projects out translation
+and rotation in the Eckart frame, reports harmonic frequencies, and can write
+per-mode normal-mode animations. `thermochemistry_analysis(...)` turns those
+frequencies into partition functions and thermodynamic quantities, using either
+rigid-rotor harmonic-oscillator vibrational entropies or Grimme's quasi-RRHO
+treatment controlled by a frequency cutoff, with configurable symmetry and
+chirality numbers.
+
 ## Parallel Trajectory Runs
 
 Use `base_seed` to reproduce an ensemble independently of worker scheduling.
@@ -277,15 +422,22 @@ Progress display is controlled with `progress_mode`. Use `progress_mode="table"`
 
 ## Repository Layout
 
-- `src/smite.py`: public compatibility module exposing `Molecule`, `Fragment`, and `Collision`.
+- `src/smite.py`: public compatibility module exposing `Molecule`, `Fragment`, `Collision`, and `Photoionization`.
 - `src/core/`: main molecular, fragment, and collision classes.
-- `src/dynamics/`: trajectory scratch, wavefunction, integrator, and thermostat driver helpers.
-- `src/integrators/`: MD and predictor-corrector integrators.
+- `src/dynamics/`: trajectory scratch, wavefunction, constraint, rigid-body, integrator, thermostat, and quantum driver helpers.
+- `src/integrators/`: MD, predictor-corrector, and constrained RATTLE integrators.
+- `src/fssh/`: fewest-switches surface hopping, Baeck-An couplings, and the adapter serving them from `pesrun`.
+- `src/photoionization/`: photoionization initial conditions and ionic dynamics.
+- `src/optimizer/`: minima, transition states, IRC, spin crossings, and coordinate scans.
+- `src/normalmode/`: Hessians, Eckart projection, frequencies, and thermochemistry.
+- `src/analysis/`: spectra, energy partitioning, conservation checks, and scattering form factors.
 - `src/parallel/`: independent parallel trajectory scheduling helpers.
 - `src/thermostats/`: NVT thermostat implementations.
 - `src/qchem_interfaces/`: external quantum chemistry and PES force interfaces.
+- `src/smite_gui/`: the `smite-gui` graphical input builder.
 - `peslib/`: predefined potential energy surfaces and PES interface examples.
-- `src/sampling/`, `src/normalmode/`, `src/optimizer/`, `src/utils/`: supporting simulation tools.
+- `src/sampling/`, `src/utils/`: supporting simulation tools.
+- `src/tests/`: the pytest suite.
 - `src/test*.py`: example input scripts.
 - `papers/`: local reference material, not packaged.
 
@@ -293,11 +445,21 @@ Generated scratch directories, output files, compiled PES binaries, build produc
 
 ## Development Checks
 
+Run the test suite from the repository root:
+
+```bash
+python -m pytest
+```
+
+Tests that need an optional dependency skip themselves: the `H2O+Kr+` surfaces
+are skipped without PyTorch or without the model weights, and the Fortran
+surfaces are skipped without `gfortran`.
+
 Basic syntax check:
 
 ```bash
 cd src
-python -m py_compile smite.py core/*.py dynamics/*.py parallel/*.py analysis/*.py qchem_interfaces/*.py integrators/*.py thermostats/*.py
+python -m py_compile smite.py core/*.py dynamics/*.py parallel/*.py analysis/*.py qchem_interfaces/*.py integrators/*.py thermostats/*.py fssh/*.py photoionization/*.py optimizer/*.py normalmode/*.py
 ```
 
 Build a source and wheel distribution from the repository root:
