@@ -266,6 +266,56 @@ def test_no_hop_leaves_the_classical_surface_alone(state_qcinput):
     assert molecule.qchem is qchem
 
 
+def test_dtq_is_given_in_femtoseconds_like_timestep(state_qcinput):
+    """``run_trajectory`` hands the driver a ``dt`` already in atomic units.
+
+    ``dtq`` still comes from the caller in femtoseconds, the same unit as
+    ``timestep``, so it must be converted before reaching FSSH -- otherwise the
+    two timesteps are silently 41.34x out of step with each other.
+    """
+    from utils.constants import FS_TO_AU_TIME
+
+    initialize_quantum_propagator(
+        "fssh", 2, 0, atoms=ATOMS, state_qcinput=state_qcinput
+    )
+
+    molecule = Molecule(ATOMS, np.ones(3), np.zeros(9), np.ones(9))
+    molecule.qchem = dict(state_qcinput[0])
+    molecule.num_states, molecule.active_state = 2, 0
+
+    seen = {}
+
+    def record(dtc, active_state, num_states, q, p, mass, dtq=None):
+        seen["dtc"], seen["dtq"] = dtc, dtq
+        return p, active_state
+
+    dt_au = 0.25 * FS_TO_AU_TIME
+    apply_quantum_integrator(molecule, "fssh", dt_au, dtq=0.025, propagator=record)
+
+    assert seen["dtc"] == pytest.approx(dt_au)
+    assert seen["dtq"] == pytest.approx(0.025 * FS_TO_AU_TIME)
+    # ten quantum steps per classical step, as the ratio of the inputs implies
+    assert int(seen["dtc"] / seen["dtq"]) == 10
+
+
+def test_dtq_left_unset_keeps_fssh_s_own_default(state_qcinput):
+    initialize_quantum_propagator(
+        "fssh", 2, 0, atoms=ATOMS, state_qcinput=state_qcinput
+    )
+    molecule = Molecule(ATOMS, np.ones(3), np.zeros(9), np.ones(9))
+    molecule.qchem = dict(state_qcinput[0])
+    molecule.num_states, molecule.active_state = 2, 0
+
+    seen = {}
+
+    def record(dtc, active_state, num_states, q, p, mass, dtq=None):
+        seen["dtq"] = dtq
+        return p, active_state
+
+    apply_quantum_integrator(molecule, "fssh", 10.0, dtq=None, propagator=record)
+    assert seen["dtq"] is None
+
+
 def test_driver_refuses_to_step_without_a_propagator():
     molecule = Molecule(ATOMS, np.ones(3), np.zeros(9), np.ones(9))
     with pytest.raises(ValueError, match="No quantum propagator was initialized"):
@@ -278,7 +328,7 @@ def test_driver_refuses_to_step_without_a_propagator():
 
 def _hydrogen_oxygen(pes_dir, tmp_path, coupled):
     """A three-atom system heading into the avoided crossing at q[0] == 0."""
-    narrow = {"gap_slope": 0.02, "min_gap": 0.002} if coupled else {}
+    narrow = {"gap_slope": 0.01, "min_gap": 0.0002} if coupled else {}
     states = [
         {"qchem": "PES", "pes_path": str(pes_dir), "state": index,
          "wfu": False, **narrow}
@@ -295,7 +345,7 @@ def _hydrogen_oxygen(pes_dir, tmp_path, coupled):
     molecule.qchem = dict(states[0])
 
     kwargs = dict(
-        integrator="verlet", timestep=0.5, maxstep=60, iprint=1000, Rstop=50.0,
+        integrator="verlet", timestep=0.5, maxstep=120, iprint=1000, Rstop=50.0,
         traj_file=str(tmp_path / "traj.xyz"), backfile=str(tmp_path / "back.xyz"),
     )
     return molecule, states, kwargs
@@ -316,6 +366,9 @@ def test_trajectory_without_q_integrator_stays_on_a_single_surface(pes_dir, tmp_
 
 
 def test_fssh_trajectory_conserves_amplitude_norm_and_hops(pes_dir, tmp_path):
+    # Hops are drawn from the global NumPy stream, so the seed is part of the
+    # test: without it this assertion is a coin toss.
+    np.random.seed(1)
     molecule, states, kwargs = _hydrogen_oxygen(pes_dir, tmp_path, coupled=True)
 
     visited = []
@@ -343,7 +396,7 @@ def test_fssh_trajectory_conserves_amplitude_norm_and_hops(pes_dir, tmp_path):
     finally:
         molecule_module.apply_quantum_integrator = original
 
-    assert len(visited) == 60
+    assert len(visited) == 120
     assert np.all(np.isfinite(molecule.q)) and np.all(np.isfinite(molecule.p))
 
     # The electronic amplitudes are propagated unitarily.

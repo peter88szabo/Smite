@@ -13,6 +13,9 @@ here would make every trajectory -- including the single-surface ones that never
 ask for surface hopping -- fail on a machine without it.
 """
 
+from utils.constants import FS_TO_AU_TIME
+
+
 QUANTUM_INTEGRATORS = ("fssh",)
 
 
@@ -70,6 +73,12 @@ def apply_quantum_integrator(molecule, name, dt, dtq=None, propagator=None):
     Updates ``molecule.p`` and ``molecule.active_state`` in place; a hop shows up
     as a change in ``active_state``.
 
+    ``dt`` arrives in atomic units, because ``run_trajectory`` has already
+    multiplied the user's ``timestep`` by ``FS_TO_AU_TIME``. ``dtq`` comes
+    straight from the caller and is therefore still in femtoseconds, like
+    ``timestep``, so it is converted here. Leaving ``dtq`` unset keeps FSSH's own
+    default of one tenth of the classical step, which is already consistent.
+
     A hop also has to redirect the *classical* force, which
     ``integrators.gradient.force_calc`` reads from a single ``molecule.qchem``
     dict and therefore from a single surface.  On a hop the keys that select the
@@ -97,7 +106,7 @@ def apply_quantum_integrator(molecule, name, dt, dtq=None, propagator=None):
         molecule.q,
         molecule.p,
         molecule.wmass,
-        dtq=dtq,
+        dtq=None if dtq is None else dtq * FS_TO_AU_TIME,
     )
 
     if molecule.active_state != previous_state:

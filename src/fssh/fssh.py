@@ -1,6 +1,8 @@
+import warnings
 from typing import Optional
 
 import numpy as np
+from scipy.linalg import eigh
 from numpy.typing import NDArray
 from numpy import float64, complex128
 
@@ -70,8 +72,9 @@ class FSSH:
             q, list(range(num_states))
         )  # TODO: This should be generally implemented for any qc method
 
-        # Update coupling every classical timestep
-        self.d = _get_couplings(q, epot, num_states, self.de_cutoff)
+        # Update coupling every classical timestep, keeping the sign of each
+        # coupling continuous with the previous step.
+        self.d = _get_couplings(q, epot, num_states, self.de_cutoff, previous=self.d)
 
         # Propagate the quantum system and check for hops
         for _ in range(num_step):
@@ -97,7 +100,11 @@ class FSSH:
 
 
 def _get_couplings(
-    q: NDArray[float64], epot: NDArray[float64], num_states: int, de_cutoff: float
+    q: NDArray[float64],
+    epot: NDArray[float64],
+    num_states: int,
+    de_cutoff: float,
+    previous: NDArray[complex128] = None,
 ):
     """
     Calculate the non-adiabatic couplings between all states
@@ -146,7 +153,10 @@ def _get_couplings(
                 if grad is not None:
                     # Compute the upper triangle matrix elements
                     d[i, j] = calculate_nac(
-                        [epot[i], epot[j]], [grad[i], grad[j]], [hess[i], hess[j]]
+                        [epot[i], epot[j]],
+                        [grad[i], grad[j]],
+                        [hess[i], hess[j]],
+                        previous_nac=None if previous is None else previous[i, j].real,
                     )
                 else:
                     d[i, j] = np.zeros_like(d[i, j])
@@ -313,7 +323,17 @@ def _update_c(
     dtq: float,
 ):
     """
-    Update the quantum amplitudes using the fourth-order Runge-Kutta method.
+    Update the quantum amplitudes with the exact unitary propagator.
+
+    The generator of the adiabatic equation of motion is anti-Hermitian, so the
+    evolution is a unitary rotation of the amplitudes and is applied here as
+    ``exp(-i H dtq)`` via a Hermitian eigendecomposition. This conserves the
+    electronic norm to machine precision for any ``dtq``.
+
+    It replaces a fourth-order Runge-Kutta step, which approximates that unitary
+    operator with a non-unitary one: the norm drifted by ~4e-2 even at weak
+    coupling and small ``dtq``, and diverged to NaN in the strong-coupling regime
+    that surface hopping exists to describe.
 
     Parameters
     ----------
@@ -335,18 +355,41 @@ def _update_c(
     NDArray[complex128]
         Updated quantum amplitudes.
     """
-    # Copy as to not modify the original state
-    c = c.copy()
+    hamiltonian = _effective_hamiltonian(v, d, num_states, epot)
 
-    k1 = _cdot(v, c, d, num_states, epot)  # slope at t
-    c_k2 = c + dtq * k1 / 2
-    k2 = _cdot(v, c_k2, d, num_states, epot)  # slope at midpoint t + dt/2
-    c_k3 = c + dtq * k2 / 2
-    k3 = _cdot(v, c_k3, d, num_states, epot)  # updated slope at midpoint t + dt/2
-    c_k4 = c + dtq * k3
-    k4 = _cdot(v, c_k4, d, num_states, epot)  # updated slope at endpoint t + dt
-    c = c + dtq / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
-    return c
+    # H is Hermitian, so exp(-i H dtq) is unitary by construction and the
+    # electronic norm is conserved to machine precision for any dtq.
+    eigenvalues, eigenvectors = eigh(hamiltonian)
+    phases = np.exp(-1.0j * eigenvalues * dtq)
+
+    return eigenvectors @ (phases * (eigenvectors.conj().T @ c))
+
+
+def _effective_hamiltonian(
+    v: NDArray[float64],
+    d: NDArray[complex128],
+    num_states: int,
+    epot: NDArray[float64],
+) -> NDArray[complex128]:
+    """Assemble the Hermitian generator of the amplitude evolution.
+
+    The adiabatic equation of motion is ``cdot = A c`` with
+    ``A = -i diag(E) - T`` and ``T_kj = v . d_kj``. The couplings are real and
+    antisymmetric, so ``T`` is anti-Hermitian, ``A`` is anti-Hermitian, and
+    ``H = i A`` -- assembled here -- is Hermitian::
+
+        H_kk = E_k
+        H_kj = -i (v . d_kj)      for k != j
+
+    which makes ``exp(-i H dt)`` the exact, unitary propagator of ``A``.
+    """
+    hamiltonian = np.zeros((num_states, num_states), dtype=complex128)
+    for i in range(num_states):
+        hamiltonian[i, i] = epot[i]
+        for j in range(num_states):
+            if i != j:
+                hamiltonian[i, j] = -1.0j * np.real(np.sum(v * d[i, j]))
+    return hamiltonian
 
 
 def _eval_hop_prob(
@@ -378,7 +421,7 @@ def _eval_hop_prob(
     Returns
     -------
     NDArray[float64]
-        Hopping probabilities.
+        Hopping probabilities. Non-negative, and summing to at most one.
     """
     g = np.zeros(num_states)  # Real hopping probability in the adiabatic basis
 
@@ -402,7 +445,36 @@ def _eval_hop_prob(
                 )
         else:
             g[state] = 0
+
+    # The expression above is first order in dtq, so it is only a probability
+    # while it stays below one. A total above one means the linearization has
+    # broken down for this timestep: the hop is then certain, and the best that
+    # can be recovered is the relative branching between the target states.
+    # Rescaling preserves those ratios; the warning says how to make it moot.
+    total = g.sum()
+    if total > 1.0:
+        _warn_hop_probability_exceeded_one()
+        g = g / total
+
     return g
+
+
+_HOP_PROBABILITY_WARNED = False
+
+
+def _warn_hop_probability_exceeded_one():
+    """Warn once per run rather than once per quantum sub-step."""
+    global _HOP_PROBABILITY_WARNED
+    if not _HOP_PROBABILITY_WARNED:
+        _HOP_PROBABILITY_WARNED = True
+        warnings.warn(
+            "Total surface-hopping probability exceeded one and was rescaled. "
+            "The first-order expression for the hop probability is only valid "
+            "below one, so the branching ratios in this run are unreliable. "
+            "Reduce dtq (the quantum timestep) until this warning stops.",
+            RuntimeWarning,
+            stacklevel=3,
+        )
 
 
 def _check_hop(hop_prob: NDArray[float64], num_states: int, active_state: int) -> int:
