@@ -54,6 +54,8 @@ from analysis.short_time_spectrum import (
 from analysis.scattering          import get_scattering_form_factors as compute_scattering_form_factors
 from dynamics.integrator_driver   import apply_integrator
 from dynamics.integrator_driver   import initialize_integrator
+from dynamics.quantum_driver      import apply_quantum_integrator
+from dynamics.quantum_driver      import initialize_quantum_propagator
 from dynamics.scratch             import set_trajectory_scratch_dir
 from dynamics.scratch             import trajectory_scratch_dir
 from dynamics.thermostat_driver   import apply_thermostat
@@ -698,6 +700,28 @@ class Molecule:
         initialize_gle_state(self, dt, thermo_param, thermo_temp)
 
 
+    def tpepico(self, ion_qchem, *, photon_energy, neutral_hessian=None,
+                neutral_geometry=None, neutral_md_file=None, qct_options=None,
+                level=0, n_samples=1, electron_energy=None, ionic_energy=None,
+                md_start=0, md_stride=1, ion_energy_offset=0.0, seed=None,
+                energy_tolerance=1e-8, output_dir=None, dynamics=None):
+        """Prepare one ionic PES from a neutral Hessian/geometry or saved MD q,p.
+
+        Level 0 preserves momenta; Level 1 scales all Cartesian momenta to
+        experimental energy constraints. Energies are eV; ionic_energy means
+        binding energy (photon minus electron energy). Each energy constraint
+        accepts a number or (energy_grid, density_grid). See photoionization/README.md.
+        Neutral sampling routines are reused, and no neutral MD is run here.
+        """
+        from photoionization.driver import tpepico
+        return tpepico(
+            self, ion_qchem, photon_energy=photon_energy, neutral_hessian=neutral_hessian,
+            neutral_geometry=neutral_geometry, neutral_md_file=neutral_md_file,
+            qct_options=qct_options, level=level, n_samples=n_samples,
+            electron_energy=electron_energy, ionic_energy=ionic_energy,
+            md_start=md_start, md_stride=md_stride, ion_energy_offset=ion_energy_offset,
+            seed=seed, energy_tolerance=energy_tolerance, output_dir=output_dir, dynamics=dynamics)
+
     def run_trajectory(self, integrator='verlet',
                              integrator_order=4,
                              timestep=1.0,
@@ -725,7 +749,14 @@ class Molecule:
                              post_collision_bond_th_XX=2.0,
                              post_collision_equilibrium_geometries=None,
                              post_collision_channel_states=None,
-                             post_collision_isolation_distance=100.0):
+                             post_collision_isolation_distance=100.0,
+                             wavefunction_dir="wavefunction_along_trajectory",
+                             q_integrator=None,
+                             num_states=1,
+                             active_state=0,
+                             state_qcinput=None,
+                             dtq=None,
+                             de_cutoff=0.5):
 
         if traj_file is None:
             traj_file = 'traj_' + self.fname + '.xyz' 
@@ -738,15 +769,22 @@ class Molecule:
             startstep = self.restart_init(fname=self.fname, backfile=backfile, restart=True)
             restart_state = self._load_restart_state(backfile, startstep)
 
+        self.post_collision_analysis_result = None
+        self.termination_reason = None
+        self.termination_channel = None
+        self.termination_step = None
+        self.termination_time_fs = None
+        self.reaction_channel_candidate = None
+        self.reaction_channel_persistence = 0
         if pairs_to_stop is not None and Rstop is None:
+            self.Rstop = None
             self.pairstop = pairs_to_stop
             self._reaction_channel_hysteresis = ReactionChannelHysteresis(
                 reaction_persistence_steps
             )
             self.reaction_persistence_steps = self._reaction_channel_hysteresis.required_steps
-            self.reaction_channel_candidate = None
-            self.reaction_channel_persistence = 0
         elif pairs_to_stop is None and Rstop is not None:
+            self.pairstop = None
             self.Rstop = Rstop * ANGSTROM_TO_BOHR #reactive event condition for trajectory 
             self._reaction_channel_hysteresis = None
         else:
@@ -770,13 +808,13 @@ class Molecule:
                 os.remove(traj_file)
                 print(f"{traj_file} already exisits, it has been deleted to create a new one")
 
-            wf_dir = prepare_wavefunction_directory(self.qchem, restart=restart)
+            wf_dir = prepare_wavefunction_directory(self.qchem, restart=restart, wf_dir=wavefunction_dir)
 
 
             print("********************************************************************************************\n")
         #--------------------------------------------------------------------------------------
         if restart:
-            wf_dir = prepare_wavefunction_directory(self.qchem, restart=restart)
+            wf_dir = prepare_wavefunction_directory(self.qchem, restart=restart, wf_dir=wavefunction_dir)
 
 
         dt = timestep * FS_TO_AU_TIME
@@ -807,12 +845,26 @@ class Molecule:
                 raise ValueError("Rstop must be larger than Rini")
 
         propag = initialize_integrator(integrator, integrator_order, len(self.q))
+
+        # Electronic state the nuclei are propagating on. Set even for a
+        # single-surface run so restart/analysis code can always read it.
+        self.num_states   = num_states
+        self.active_state = active_state
+        q_propag = initialize_quantum_propagator(
+            q_integrator,
+            num_states,
+            active_state,
+            atoms=self.atoms,
+            state_qcinput=state_qcinput,
+            de_cutoff=de_cutoff,
+        )
         self._restore_integrator_restart_state(
             restart_state, propag, integrator, integrator_order
         )
 
         with open(traj_file, "a") as file_trj:
-            for istep in range(startstep, maxstep):
+            # Inspect the terminal state too, without an extra integration.
+            for istep in range(startstep, maxstep + 1):
 
                 # Reaction tests are dynamics conditions, not output conditions:
                 # evaluate them at every stored state regardless of iprint.
@@ -840,7 +892,7 @@ class Molecule:
                     channel = 'Not Specified'
 
                 #-----------------------------------------------------------------------------
-                if (iprint > 0 and istep % iprint == 0 and istep > startstep) or istep == startstep or tstop:
+                if (iprint > 0 and istep % iprint == 0 and istep > startstep) or istep in {startstep, maxstep} or tstop:
 
                     if self.qchem['wfu']:
                         file_wf = wavefunction_file(wf_dir, self.fname, istep)
@@ -883,6 +935,10 @@ class Molecule:
                             )
 
                     if tstop:
+                        self.termination_reason = "stop_condition"
+                        self.termination_channel = channel
+                        self.termination_step = istep
+                        self.termination_time_fs = istep * timestep
                         #minPts: minum number of points to be a cluster
                         #eps: in Angstrom the tolerance within can be considered something as cluster
 
@@ -931,8 +987,16 @@ class Molecule:
                         break
                 #-----------------------------------------------------------------------------
 
+                if istep == maxstep:
+                    self.termination_reason = "maxstep"
+                    self.termination_step = istep
+                    self.termination_time_fs = istep * timestep
+                    print("\n Propagation time has reached the maximum number of steps")
+                    break
+
                 apply_integrator(self, integrator, dt, propag)
                 apply_thermostat(self, thermostat, thermo_param, thermo_temp, dt)
+                apply_quantum_integrator(self, q_integrator, dt, dtq, q_propag)
 
                 if spectrum and thermostat is None:
                     self.save_velocity_and_distance_matrix(time_fs=(istep + 1) * dt / FS_TO_AU_TIME)
@@ -955,8 +1019,6 @@ class Molecule:
                 )
                 #--------------------------------------------------------------------------
 
-                if istep == (maxstep-1):
-                    print("\n Propgation time has reached the maximum number of steps")
 
 
     def restart_init(self, fname, integrator='verlet', timestep=1.0, startstep=0, maxstep=100, iprint=2, traj_file=None, backfile=None, restart=False):

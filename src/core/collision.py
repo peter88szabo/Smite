@@ -449,6 +449,12 @@ class Collision(Molecule):
 
 
     def Sample_Bimolecular_Reactants(self, **kwargs):
+        # Seed the collision once: reseeding each fragment would correlate
+        # their phases, rotations, and any thermal draws.
+        set_sampling_seed(
+            kwargs.pop("sampling_seed", None), label="collision",
+            metadata_file=kwargs.get("seed_metadata_file", "sampling_seed_metadata.jsonl"),
+        )
         #---------------------------------------------
         # Sample the internal motions of a fragment:
         #---------------------------------------------

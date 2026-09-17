@@ -2,6 +2,8 @@ import os
 
 import numpy as np
 
+from sampling.random_seed import sampling_generator
+
 
 def _read_gle_matrix(path, expected_ns=None):
     if not os.path.exists(path):
@@ -93,7 +95,7 @@ class GLEThermostat:
         if kt <= 0.0:
             raise ValueError("GLE temperature must be positive")
 
-        self.rng = rng if rng is not None else np.random.default_rng()
+        self.rng = rng if rng is not None else sampling_generator()
         self.ns, gA = _read_gle_matrix(a_file)
         gA = gA * wopt
 

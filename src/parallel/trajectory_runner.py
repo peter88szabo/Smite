@@ -502,7 +502,18 @@ def _run_one_from_factory(
                     pes_single_core=pes_single_core,
                 )
                 _install_progress_callback(system, result, status_file, progress_queue)
-                single_run(system, context, **run_kwargs)
+                trajectory_kwargs = dict(run_kwargs)
+                thermo_param = trajectory_kwargs.get("thermo_param")
+                if (
+                    trajectory_kwargs.get("thermostat") == "gle"
+                    and isinstance(thermo_param, dict)
+                    and thermo_param.get("seed") is not None
+                ):
+                    trajectory_kwargs["thermo_param"] = dict(
+                        thermo_param,
+                        seed=derive_trajectory_seed(thermo_param["seed"], itraj),
+                    )
+                single_run(system, context, **trajectory_kwargs)
             stdout_capture.flush()
         result.status = "finished"
     except Exception as exc:
@@ -624,8 +635,9 @@ def run_parallel_trajectories(
         raise ValueError("max_parallel_jobs must be >= 1")
     progress_mode = _resolve_progress_mode(progress_report, progress_mode)
 
-    base_seed = _resolve_base_seed(base_seed)
     run_kwargs = dict(run_kwargs or {})
+    sampling_seed = run_kwargs.pop("sampling_seed", None)
+    base_seed = _resolve_base_seed(base_seed if base_seed is not None else sampling_seed)
     active_jobs = min(max_parallel_jobs, total_trajectories)
     results = []
     pending = {}
@@ -744,8 +756,9 @@ def _run_parallel_from_template(
         raise ValueError("max_parallel_jobs must be >= 1")
     progress_mode = _resolve_progress_mode(progress_report, progress_mode)
 
-    base_seed = _resolve_base_seed(base_seed)
     run_kwargs = dict(run_kwargs or {})
+    sampling_seed = run_kwargs.pop("sampling_seed", None)
+    base_seed = _resolve_base_seed(base_seed if base_seed is not None else sampling_seed)
     active_jobs = min(max_parallel_jobs, total_trajectories)
     results = []
     pending = {}

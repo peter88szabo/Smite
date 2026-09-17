@@ -19,6 +19,8 @@ from itertools import combinations
 
 import numpy as np
 
+from dynamics.rigid_body import free_rigid_body_step, project_rigid_momenta
+
 
 MAX_PAIRWISE_SHAKE_ATOMS = 32
 
@@ -223,11 +225,14 @@ class RigidConstraintSolver:
             maximum = max(maximum, residual / constraint.distance_squared)
         return maximum
 
-    def shake(self, q_old, q_trial, p_drift, dt, wmass):
+    def shake(self, q_old, q_trial, p_drift, dt, wmass, *, rigid_body_drift=False):
         """Apply the iterative SHAKE position correction.
 
         The momentum accumulated during the drift is corrected by the
-        corresponding constraint impulse, ``m * delta_q / dt``.
+        corresponding constraint impulse, ``m * delta_q / dt``. During
+        propagation, ``rigid_body_drift=True`` advances rank-deficient and
+        large groups with a reversible rigid-body split instead of fitting
+        an unconstrained drift, which would dissipate angular momentum.
         """
         if not np.isfinite(dt) or dt == 0.0:
             raise ValueError("SHAKE requires a finite, nonzero timestep")
@@ -241,13 +246,18 @@ class RigidConstraintSolver:
 
         # At a linear or planar reference structure, a pure distance-constraint
         # Jacobian is rank deficient for out-of-line/out-of-plane deformation.
-        # Project those groups directly onto their rigid-motion manifold before
-        # applying ordinary pairwise SHAKE to the regular groups.
+        # Advance those groups as rigid bodies during dynamics, or fit their
+        # shape during initialization, before applying SHAKE to regular groups.
         for group_index in self.singular_group_indices:
             group = self.rigid_groups[group_index]
             indices = group["atom_indices"]
             reference = group["reference_positions"]
             group_masses = masses[indices]
+            if rigid_body_drift:
+                trial_xyz[indices], momentum[indices] = free_rigid_body_step(
+                    reference, old_xyz[indices], momentum[indices], group_masses, dt
+                )
+                continue
             total_mass = float(np.sum(group_masses))
 
             reference_com = np.sum(reference * group_masses[:, None], axis=0) / total_mass
@@ -319,6 +329,20 @@ class RigidConstraintSolver:
         projected, _ = self.shake(q, q, zero_momentum, 1.0, wmass)
         return projected
 
+    def project_body_momenta(self, q, p_trial, wmass):
+        """Project only the groups propagated with the rigid-body split."""
+        xyz = self._as_xyz(q, "Coordinates")
+        momentum = np.array(self._as_xyz(p_trial, "Momenta"), copy=True)
+        if momentum.shape != xyz.shape:
+            raise ValueError("Coordinate and momentum shapes are inconsistent")
+        masses = self._atom_masses(wmass, len(xyz))
+        for group_index in self.singular_group_indices:
+            indices = self.rigid_groups[group_index]["atom_indices"]
+            momentum[indices] = project_rigid_momenta(
+                xyz[indices], momentum[indices], masses[indices]
+            )
+        return momentum.ravel()
+
     def rattle(self, q, p_trial, wmass):
         """Apply the iterative RATTLE momentum/velocity correction."""
         xyz = self._as_xyz(q, "Coordinates")
@@ -333,23 +357,9 @@ class RigidConstraintSolver:
         for group_index in self.singular_group_indices:
             group = self.rigid_groups[group_index]
             indices = group["atom_indices"]
-            group_masses = masses[indices]
-            group_momentum = momentum[indices]
-            total_mass = float(np.sum(group_masses))
-            center = np.sum(xyz[indices] * group_masses[:, None], axis=0) / total_mass
-            relative_positions = xyz[indices] - center
-            center_velocity = np.sum(group_momentum, axis=0) / total_mass
-            angular_momentum = np.sum(
-                np.cross(relative_positions, group_momentum), axis=0
+            momentum[indices] = project_rigid_momenta(
+                xyz[indices], momentum[indices], masses[indices]
             )
-            inertia = np.zeros((3, 3))
-            for atom_mass, position in zip(group_masses, relative_positions):
-                inertia += atom_mass * (
-                    np.dot(position, position) * np.eye(3) - np.outer(position, position)
-                )
-            angular_velocity = np.linalg.pinv(inertia, rcond=1.0e-12) @ angular_momentum
-            rigid_velocity = center_velocity + np.cross(angular_velocity, relative_positions)
-            momentum[indices] = group_masses[:, None] * rigid_velocity
 
         for _iteration in range(self.max_iterations):
             maximum = 0.0

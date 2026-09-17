@@ -30,7 +30,7 @@ from sampling.polyvibration       import initialize_vibrational_modes
 from sampling.polyrotation        import initialize_rotational_modes
 from sampling.polyvibration       import polyatom_vibration_sampling
 from sampling.polyvibration       import specify_vib_modes 
-from sampling.polyrotation        import polyatom_rotation_sampling
+from sampling.polyrotation        import polyatom_rotation_sampling, calcI
 from sampling.thermal             import thermal_collision_energy
 from sampling.diatom              import diatom_rotation_rigidrot_sampling
 from sampling.diatom              import diatom_vibration_harmonic_sampling 
@@ -549,7 +549,8 @@ class Fragment(Molecule):
             # A proper vibrational energy decomposition is not implemented here yet.
             # Do not store a physically wrong Evib=0.0 after vibrational sampling.
             evib = None
-            erot = sum([angmom[i]**2 / inertia[i]/2.0 for i in range(len(angmom))])
+            _, inertia_inverse = calcI(self.q, self.mass)
+            erot = float(0.5 * angmom @ inertia_inverse @ angmom)
 
             self.erot     = erot
             self.vib      = evib

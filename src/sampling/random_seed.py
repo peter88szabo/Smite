@@ -40,5 +40,16 @@ def set_sampling_seed(seed, *, label="sampling", metadata_file=None, print_repor
     return record
 
 
+def sampling_generator(seed=None):
+    """Create an independent generator controlled by the sampling stream.
+
+    Without an explicit seed, draw its SeedSequence entropy from NumPy's
+    seeded legacy stream, which is also saved in trajectory checkpoints.
+    """
+    if seed is None:
+        seed = np.random.randint(0, 2**32, size=4, dtype=np.uint32)
+    return np.random.default_rng(np.random.SeedSequence(seed))
+
+
 def current_sampling_seed():
     return _CURRENT_SAMPLING_SEED

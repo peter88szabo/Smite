@@ -275,7 +275,8 @@ def test_rattle_is_reapplied_after_thermostat_momentum_change(monkeypatch):
     molecule.add_rigid_constraint_group([0, 1], degrees_of_freedom_removed=1)
     molecule.prepare_rigid_constraints(algorithm="rattle")
 
-    def deliberately_nontangent(_nfix, _p, _wmass, _dt, _prob, _temperature):
+    def deliberately_nontangent(_nfix, _p, _wmass, _dt, _prob, _temperature, *, collective=False):
+        assert collective
         return np.array([1.0, 0.0, 0.0, -2.0, 0.0, 0.0])
 
     monkeypatch.setattr("dynamics.thermostat_driver.thermo_andersen", deliberately_nontangent)

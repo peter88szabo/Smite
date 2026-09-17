@@ -69,7 +69,13 @@ def apply_thermostat(molecule, thermostat, thermo_param, thermo_temp, dt):
         molecule.p = thermo_berendsen(removed_dof, molecule.p, molecule.wmass, dt, tau, thermo_temp)
     elif thermostat == "andersen":
         collision_time = thermo_param * FS_TO_AU_TIME
-        molecule.p = thermo_andersen(removed_dof, molecule.p, molecule.wmass, dt, collision_time, thermo_temp)
+        options = {}
+        if has_constraints or getattr(molecule, "remove_com", False):
+            options["collective"] = True
+        molecule.p = thermo_andersen(
+            removed_dof, molecule.p, molecule.wmass, dt, collision_time,
+            thermo_temp, **options
+        )
     elif thermostat == "nosehoover":
         tau = thermo_param * FS_TO_AU_TIME
         molecule.p, molecule._nosehoover_state = thermo_nosehoover(
@@ -91,7 +97,7 @@ def apply_thermostat(molecule, thermostat, thermo_param, thermo_temp, dt):
     if (
         thermostat is not None
         and getattr(molecule, "has_rigid_constraints", False)
-        and molecule._constraint_algorithm == "rattle"
+        and (molecule._constraint_algorithm == "rattle" or thermostat == "andersen")
     ):
         molecule.project_rigid_momenta()
 

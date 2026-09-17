@@ -5,6 +5,7 @@ import numpy as np
 from integrators.gradient import Potential_Energy
 from sampling.polyrotation import angular_momentum, calcI
 from utils.cenmass import cenmass
+from utils.geometry import reference_rotation
 
 
 def center_of_mass(q, mass):
@@ -142,7 +143,10 @@ def fragment_energy_partition(
     else:
         if eq_geometry is not None:
             eq_internal = eq_geometry - center_of_mass(eq_geometry, mass_vec)
-            inertia = inertia_tensor(eq_internal, mass_vec)
+            # L is in the current laboratory frame. Align the corresponding
+            # reference atoms before contracting it with the reference inertia.
+            rotation = reference_rotation(eq_internal, q_internal, mass_vec)
+            inertia = inertia_tensor(eq_internal @ rotation.T, mass_vec)
             rotational_reference = "equilibrium"
         else:
             inertia = inertia_tensor(q_internal, mass_vec)

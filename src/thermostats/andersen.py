@@ -2,9 +2,14 @@ import numpy as np
 import random
 from utils.constants import R_GAS_HARTREE_PER_K
 
-def thermo_andersen(nfix, p, wmass, dt, collision_time, Ttarg):
+def thermo_andersen(nfix, p, wmass, dt, collision_time, Ttarg, *, collective=False):
     """
-    Apply independent Poisson-distributed Andersen collisions to atoms.
+    Apply Poisson-distributed Andersen collisions to atoms.
+
+    With ``collective=True``, one collision redraws every momentum. The
+    caller must then project COM/rigid constraints. Projecting a complete
+    Maxwell draw preserves the constrained canonical distribution; partial
+    atom redraws followed by projection do not.
 
     ``dt`` and the mean ``collision_time`` must use the same time unit.
 
@@ -35,6 +40,12 @@ def thermo_andersen(nfix, p, wmass, dt, collision_time, Ttarg):
         raise ValueError("Andersen nfix must satisfy 0 <= nfix < 3N")
 
     collision_probability = -np.expm1(-float(dt) / float(collision_time))
+    if collective:
+        if random.uniform(0.0, 1.0) < collision_probability:
+            for index in range(len(p)):
+                p[index] = np.sqrt(wmass[index] * RT) * random.normalvariate(0.0, 1.0)
+        return p
+
     for atom_index in range(len(p) // 3):
         if random.uniform(0.0, 1.0) < collision_probability:
             component = slice(3 * atom_index, 3 * atom_index + 3)
