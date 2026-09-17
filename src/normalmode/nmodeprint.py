@@ -2,16 +2,16 @@ import numpy as np
 import math
 import os
 from normalmode.normalmode import getNormalmode
+from utils.constants import BOHR_TO_ANGSTROM
 
 def print_nmode_traj(atoms, q, dt, istep, output_file):
-    b2a = 0.52917721092
     output_file.write(str(len(atoms)) + "\n")
     output_file.write("%7s %10d %4s %15.4f\n" % ("step= ", istep, "    theta[rad]= ", dt * istep))
     for i in range(0, len(atoms)):
         jx = 3 * i
         jy = 3 * i + 1
         jz = 3 * i + 2
-        output_file.write("%3s %15.5f  %15.5f %15.5f\n" % (atoms[i], q[jx] * b2a, q[jy] * b2a, q[jz] * b2a))
+        output_file.write("%3s %15.5f  %15.5f %15.5f\n" % (atoms[i], q[jx] * BOHR_TO_ANGSTROM, q[jy] * BOHR_TO_ANGSTROM, q[jz] * BOHR_TO_ANGSTROM))
 
 def print_single_mode(filename, atoms, nmode, q_eq, L, Amp, imode, **kwargs):
     ntheta = kwargs.get('ntheta', 600)
@@ -70,4 +70,3 @@ def print_normalmode(fname, atoms, mass, q_eq, hessian, **kwargs):
         return (ww, ww_low, L)
 
     return
-

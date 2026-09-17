@@ -1,68 +1,50 @@
 import numpy as np
 import random
 import math
+from utils.constants import HARTREE_TO_CM1, HARTREE_TO_EV, HARTREE_TO_KJMOL, R_GAS_HARTREE_PER_K
 
 from sampling.thermal   import thermal_rot_quantum_spherical_top
 from sampling.thermal   import thermal_rot_classic_spherical_top 
 from sampling.thermal   import thermal_rot_asymmetric_top_equipart 
-from sampling.thermal   import thermal_rot_symmetric_top 
+from sampling.thermal   import thermal_rot_canonical_top
 
 
 #from cenmass import cenmass
 #from euler import euler_rot
 #from thermal import thermal_vibr_mode  
 
-#     [Anstrom]*c1=[bohr]
-c1=1.0e0/0.5291772e0
-#     [kcal/mol]*c2=[Hartree]
-c2=1.e0/627.51e0
-#     [g/mol]*c3=[electron mass unit]
-c3=1838.6836605e0
-#     [Hartree]*c4=[eV]
-c4=27.2114
-#     [Hartree]*c5=[cm-1]
-c5=219474.e0
-#     [femto-sec]*c6=[time in au]
-c6=41.341105
-#     [frequency in cm-1]*c9=[freq(bohr^(-1))]
-c9=1.0e8*c1
-#     [speed of light in atomic unit]
-c10=137.035999074
-
-
-c7 = 2625.5         # [Hartree] * c7 = [kJ/mol]
-
-Rgas = 8.3144598/1000.0/c7 #Hartree/K
-
 from math import sin, cos
 
-def calcI(qq, w):
-    Ixx = 0.0
-    Iyy = 0.0
-    Izz = 0.0
-    Ixy = 0.0
-    Ixz = 0.0
-    Iyz = 0.0
-    for i in range(len(w)):
-        jx = 3*i
-        jy = 3*i+1
-        jz = 3*i+2
+def _inertia_properties(qq, w):
+    """Return the physical inertia tensor and principal-axis decomposition.
 
-        Ixx += w[i] * (qq[jy]**2 + qq[jz]**2)
-        Iyy += w[i] * (qq[jx]**2 + qq[jz]**2)
-        Izz += w[i] * (qq[jx]**2 + qq[jy]**2)
-        Ixy += w[i] * qq[jx]*qq[jy]
-        Ixz += w[i] * qq[jx]*qq[jz]
-        Iyz += w[i] * qq[jy]*qq[jz]
-    I = np.array([
-        [Ixx, Ixy, Ixz],
-        [Ixy, Iyy, Iyz],
-        [Ixz, Iyz, Izz]
-        ])
-    #principial axis and eigenvalues
-    Ixyz, dontneed = np.linalg.eigh(I)
-    Iinv = np.linalg.inv(I)
-    return (Ixyz, Iinv)
+    Coordinates must be relative to the molecular center of mass.
+    ``principal_axes[:, i]`` is principal axis ``i`` expressed in the
+    laboratory Cartesian frame.
+    """
+    q_xyz = np.asarray(qq, dtype=float).reshape((-1, 3))
+    mass = np.asarray(w, dtype=float).reshape(-1)
+    if q_xyz.shape[0] != mass.size:
+        raise ValueError("Inertia calculation requires one mass per Cartesian atom")
+
+    inertia = np.zeros((3, 3), dtype=float)
+    identity = np.eye(3)
+    for atom_mass, position in zip(mass, q_xyz):
+        inertia += atom_mass * (
+            np.dot(position, position) * identity - np.outer(position, position)
+        )
+
+    principal_moments, principal_axes = np.linalg.eigh(inertia)
+    # This equals the inverse for nonlinear molecules and remains defined for
+    # a linear molecule's zero principal moment.
+    inertia_inverse = np.linalg.pinv(inertia, rcond=1.0e-12, hermitian=True)
+    return principal_moments, principal_axes, inertia, inertia_inverse
+
+
+def calcI(qq, w):
+    """Return principal moments and the laboratory-frame inverse inertia."""
+    principal_moments, _principal_axes, _inertia, inertia_inverse = _inertia_properties(qq, w)
+    return principal_moments, inertia_inverse
 
 
 
@@ -124,13 +106,15 @@ def add_rotational_momentum(angvel, mass, q, p):
                 wx*qy - wy*qx
               ])
 
-        #rotational momentum of the ith atom
+        # Rotational momentum of atom i is p_rot = m_i (omega x r_i).
+        # This must be added to the current momentum so that the assembled
+        # coordinates carry the target angular momentum L = I omega.
         pang = mass[i] * ang
 
-        #add to the vibrational momentum the rotational one
-        p[jx] -= pang[0]
-        p[jy] -= pang[1]
-        p[jz] -= pang[2]
+        # Add the rotational contribution with the physical sign.
+        p[jx] += pang[0]
+        p[jy] += pang[1]
+        p[jz] += pang[2]
 
     return p
 
@@ -153,9 +137,9 @@ def initialize_rotational_modes(init_rot_type='Jfix', temp=300.0, jrot=0, krot=0
 
 def polyatom_rotation_sampling(rot_modes, mass, q, p):
 
-    #Ixyz: principial moment inertia
-    #Iinv : inverse of the intertia tensor
-    Ixyz,Iinv = calcI(q, mass)
+    # Ixyz contains principal moments. Iinv acts in the laboratory frame,
+    # while principal_axes maps principal-axis components into that frame.
+    Ixyz, principal_axes, _inertia, Iinv = _inertia_properties(q, mass)
 
     #---------------------------------------------------------------------------------------
     #obtain a rotational quantum number (fixed J, fixed energy or thermal sampling)
@@ -171,25 +155,30 @@ def polyatom_rotation_sampling(rot_modes, mass, q, p):
         jrot = excitation
         amrot = math.sqrt(jrot * (jrot + 1))
 
-        #set random direction for angular momentum
-        theta = random.uniform(0, math.pi)
-        phi =  random.uniform(0, 2*math.pi)
+        # Sample the target angular-momentum direction uniformly on the sphere.
+        cos_theta = random.uniform(-1.0, 1.0)
+        sin_theta = math.sqrt(max(0.0, 1.0 - cos_theta * cos_theta))
+        phi = random.uniform(0.0, 2.0 * math.pi)
 
         am = np.array([
-            amrot*sin(theta)*cos(phi),
-            amrot*sin(theta)*sin(phi),
-            amrot*cos(theta)
+            amrot * sin_theta * cos(phi),
+            amrot * sin_theta * sin(phi),
+            amrot * cos_theta,
          ])
 
     elif sampling_mode == 'T':
         print(f"Thermal Sampling:")
         print(f"Temp = {excitation:>12.2f} K")
         print(f"Angular momentum has been sampled directly (not the quantum number)")
-        print(f"w.r.t a symmetric top (oblate or prolate)")
+        print(f"from the canonical rigid-top distribution")
 
-        RT = Rgas * excitation #excitation is the temperature here
+        RT = R_GAS_HARTREE_PER_K * excitation #excitation is the temperature here
        #am = thermal_rot_asymmetric_top_equipart(RT, Ixyz) 
-        am = thermal_rot_symmetric_top(RT,Ixyz)
+        am_principal = thermal_rot_canonical_top(RT, Ixyz)
+        # The thermal sampler returns components along the principal axes.
+        # Convert them to the laboratory frame before combining them with
+        # Cartesian vibrational angular momentum.
+        am = principal_axes @ am_principal
         am_abs = np.linalg.norm(am)
         print(f"Princ. Mom. Inertia = [{Ixyz[0]:<12.5f} {Ixyz[1]:>12.5f} {Ixyz[2]:>12.5f}] a.u.")
         print(f"Angmom =  [{am[0]:<12.5f} {am[1]:>12.5f} {am[2]:>12.5f}] a.u.")
@@ -198,8 +187,8 @@ def polyatom_rotation_sampling(rot_modes, mass, q, p):
         raise ValueError("sampling_mode must be 'Q', 'T'")
     #---------------------------------------------------------------------------------------
 
-    Erot = sum([am[i]**2/Ixyz[i]/2.0 for i in range(len(am))])
-    print(f"Erot = {Erot*c5:>12.2f} cm-1  {Erot*c7:>12.3f} kJ/mol  {Erot*c4:>12.5f} eV")
+    Erot = 0.5 * float(am @ Iinv @ am)
+    print(f"Erot = {Erot*HARTREE_TO_CM1:>12.2f} cm-1  {Erot*HARTREE_TO_KJMOL:>12.3f} kJ/mol  {Erot*HARTREE_TO_EV:>12.5f} eV")
     print("-------------------------------------------------------------------------\n")
 
     am_corrected = angmom_correction_after_vibrational_sampling(am, q, p)
@@ -210,6 +199,16 @@ def polyatom_rotation_sampling(rot_modes, mass, q, p):
 
     #Add rotational momentum to the vibrational one
     p = add_rotational_momentum(angvel, mass, q, p)
+
+    # Cartesian momenta are the source of truth. Guard against future
+    # sign/frame regressions by checking that they carry the requested total J.
+    am_actual = np.asarray(angular_momentum(q, p), dtype=float)
+    angmom_tolerance = 1.0e-9 * max(1.0, float(np.linalg.norm(am)))
+    if not np.allclose(am_actual, am, rtol=1.0e-9, atol=angmom_tolerance):
+        raise RuntimeError(
+            "Rotational sampling failed to realize the requested angular momentum: "
+            f"target={am}, actual={am_actual}"
+        )
 
     return (p, am, Ixyz)
 #asd

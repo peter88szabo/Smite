@@ -4,8 +4,9 @@ class QChem(Enum):
     XTB = 'XTB'
     ORCA = 'Orca'
     SPARROW_BIN = 'Sparrow_bin'
-    SPARROW_PY = 'Sparrow_py'
+    SPARROW_PY = 'Sparrow_Py'
     PYSCF = 'PySCF'
+    PSI4 = 'Psi4'
     MOLPRO = 'Molpro'
     PES = 'PES'
 
@@ -29,7 +30,7 @@ class Calculator:
         match self.qchem:
             case QChem.XTB:
                 self.method = None
-            case QChem.ORCA | QChem.MOLPRO | QChem.PYSCF:
+            case QChem.ORCA | QChem.MOLPRO | QChem.PYSCF | QChem.PSI4:
                 self.method = "HF"
             case QChem.SPARROW_BIN | QChem.SPARROW_PY:
                 self.method = "PM6"
@@ -44,19 +45,13 @@ class Calculator:
                 f"wfu={self.wfu},\n nproc={self.nproc},\n path={self.path},\n basis={self.basis},\n additional={self.additional}\n")
 
 
-# Example usage:
-calc_xtb = Calculator(qchem=QChem.XTB)
-calc_orca = Calculator(qchem=QChem.ORCA)
-calc_sparrow = Calculator(qchem=QChem.SPARROW_BIN)
-calc_pyscf = Calculator(qchem=QChem.PYSCF)
-
-# Function to print out the current configuration
 def display_calculators():
+    # Helper for interactive inspection only; avoid side effects at import time.
+    calc_xtb = Calculator(qchem=QChem.XTB)
+    calc_orca = Calculator(qchem=QChem.ORCA)
+    calc_sparrow = Calculator(qchem=QChem.SPARROW_BIN)
+    calc_pyscf = Calculator(qchem=QChem.PYSCF)
     print(calc_xtb.display())
     print(calc_orca.display())
     print(calc_sparrow.display())
     print(calc_pyscf.display())
-
-# Display the configurations
-display_calculators()
-

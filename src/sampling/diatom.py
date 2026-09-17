@@ -3,36 +3,40 @@ import random
 import math
 
 from utils.cenmass         import cenmass
+from utils.constants       import HARTREE_TO_CM1, HARTREE_TO_EV, HARTREE_TO_KCAL_MOL
+from utils.constants       import HARTREE_TO_KJMOL, R_GAS_HARTREE_PER_K
 
 from sampling.thermal      import thermal_vibr_mode 
 from sampling.thermal      import thermal_rot_quantum_spherical_top
+from sampling.polyvibration import sample_wigner_ground_mode
 from sampling.polyrotation import angular_momentum 
 from sampling.polyrotation import angmom_correction_after_vibrational_sampling 
 from sampling.polyrotation import add_rotational_momentum 
 
-#     [Anstrom]*c1=[bohr]
-c1=1.0e0/0.5291772e0
-#     [kcal/mol]*c2=[Hartree]
-c2=1.e0/627.51e0
-#     [g/mol]*c3=[electron mass unit]
-c3=1838.6836605e0
-#     [Hartree]*c4=[eV]
-c4=27.2114
-#     [Hartree]*c5=[cm-1]
-c5=219474.e0
-#     [femto-sec]*c6=[time in au]
-c6=41.341105
-#     [frequency in cm-1]*c9=[freq(bohr^(-1))]
-c9=1.0e8*c1
-#     [speed of light in atomic unit]
-c10=137.035999074
 
 
-c7 = 2625.5         # [Hartree] * c7 = [kJ/mol]
 
-Rgas = 8.3144598/1000.0/c7 #Hartree/K
+def _print_diatom_vibrational_summary(title, sampling_mode, excitation, nvib, ezero, evib):
+    print("\n-------------------------------------------------------------------------")
+    print(title)
+    if sampling_mode == 'Q':
+        print(f"Fix Quantum Number: nvib = {nvib}")
+    elif sampling_mode == 'T':
+        print("Thermal Sampling:")
+        print(f"Temp = {excitation:>12.2f} K")
+        print(f"nvib = {nvib}")
+    elif sampling_mode == 'E':
+        print("Fixed Energy Sampling:")
+        print(f"Effective nvib = {nvib:.6f}")
+    elif sampling_mode == 'W':
+        print("Ground-state Wigner Sampling:")
+        print(f"Effective nvib = {nvib:.6f}")
 
-
+    print(f"\n{'traj index:':15} {-999} {'     Ezero':15} {'      Evib':15} {'      Eexc':15}")
+    print(f"{'kcal/mol -->':15} {ezero*HARTREE_TO_KCAL_MOL:15.3f} {evib*HARTREE_TO_KCAL_MOL:15.3f} {(evib-ezero)*HARTREE_TO_KCAL_MOL:15.3f}")
+    print(f"{'kJ/mol   -->':15} {ezero*HARTREE_TO_KJMOL:15.3f} {evib*HARTREE_TO_KJMOL:15.3f} {(evib-ezero)*HARTREE_TO_KJMOL:15.3f}")
+    print(f"{'cm-1     -->':15} {ezero*HARTREE_TO_CM1:15.3f} {evib*HARTREE_TO_CM1:15.3f} {(evib-ezero)*HARTREE_TO_CM1:15.3f}")
+    print("-------------------------------------------------------------------------\n")
 
 
 def diatom_rotation_rigidrot_sampling(rot_modes, mass, q, p):
@@ -60,8 +64,7 @@ def diatom_rotation_rigidrot_sampling(rot_modes, mass, q, p):
         print(f"Temp = {excitation:>12.2f} K")
         print(f"Quantum number sampled directly from thermal distribution")
 
-        Rgas = (8.3144598/1000.0/2625.5) #in Hartree/K
-        RT = Rgas * excitation #excitation is the temperature here
+        RT = R_GAS_HARTREE_PER_K * excitation
         jrot = thermal_rot_quantum_spherical_top(RT,Inertia)
         print("jrot = ", jrot)
         angmomabs = math.sqrt(jrot * (jrot + 1))
@@ -81,14 +84,16 @@ def diatom_rotation_rigidrot_sampling(rot_modes, mass, q, p):
 
     Erot1 = sum([angmom[i]**2/ai[i]/2.0 for i in range(len(angmom))])
     Erot = jrot*(jrot+1.0)/Inertia/2.0
-    #print(f"Erot1 = {Erot1*c5:>12.2f} cm-1  {Erot1*c7:>12.3f} kJ/mol  {Erot1*c4:>12.5f} eV")
-    print(f"Erot = {Erot*c5:>12.2f} cm-1  {Erot*c7:>12.3f} kJ/mol  {Erot*c4:>12.5f} eV")
+    #print(f"Erot1 = {Erot1*HARTREE_TO_CM1:>12.2f} cm-1  {Erot1*HARTREE_TO_KJMOL:>12.3f} kJ/mol  {Erot1*HARTREE_TO_EV:>12.5f} eV")
+    print(f"Erot = {Erot*HARTREE_TO_CM1:>12.2f} cm-1  {Erot*HARTREE_TO_KJMOL:>12.3f} kJ/mol  {Erot*HARTREE_TO_EV:>12.5f} eV")
 
     print(f"-------------------------------------------------------------------------\n")
 
+    # add_rotational_momentum now adds p_rot = m (omega x r), so the
+    # physical angular velocity components must carry the same sign as L = I omega.
     wx = 0.0
-    wy = -angmom[1] / ai[1]
-    wz = -angmom[2] / ai[2]
+    wy = angmom[1] / ai[1]
+    wz = angmom[2] / ai[2]
 
     angvel = np.array([wx, wy, wz])
 
@@ -105,32 +110,47 @@ def diatom_vibration_harmonic_sampling(vib_modes, req, omega, mass):
     sampling_mode = vib_modes[0][1] # it must be 'Q', 'E', 'T'
     excitation = vib_modes[0][2] #it's either the nvib quantum number, energy or temperature
 
+    redmass = mass[0]*mass[1] / (mass[0] + mass[1])
+
     if sampling_mode == 'Q':
-        print(f"Diatom Vibrational Sampling: Fix nvib = {nvib:<d10}")
+        nvib = excitation
         energy = omega * (nvib + 0.5)
     elif sampling_mode == 'T':
-        print(f"Diatom Vibrational Sampling: Thermal Temp = {excitation:<d12.2} K")
-        Rgas = (8.3144598/1000.0/2625.5) #in Hartree/K
-        RT = Rgas * excitation #excitation is the temperature here
+        RT = R_GAS_HARTREE_PER_K * excitation
         nvib = thermal_vibr_mode(RT, omega)
         energy = omega * (nvib + 0.5)
     elif sampling_mode == 'E':
         nvib = excitation/omega - 0.5 #non-integer quantum number
+        energy = excitation
+    elif sampling_mode == 'W':
+        if excitation not in (None, 0, 0.0):
+            raise ValueError("Wigner sampling currently supports only the vibrational ground state")
+        q_norm, v_norm, energy, nvib = sample_wigner_ground_mode(omega)
     else:
-        raise ValueError("Either nvib=xxx or temp=xxx or energy=xxx must be given as input in diatom_vibration_harmonic_sampling()")
+        raise ValueError("Either nvib=xxx, temp=xxx, energy=xxx, or Wigner mode must be given as input in diatom_vibration_harmonic_sampling()")
+
+    ezero = 0.5 * omega
+    _print_diatom_vibrational_summary(
+        title="Diatom Harmonic Vibrational Sampling:",
+        sampling_mode=sampling_mode,
+        excitation=excitation,
+        nvib=nvib,
+        ezero=ezero,
+        evib=energy,
+    )
 
     q = []
     p = []
 
-    redmass = mass[0]*mass[1] / (mass[0] + mass[1])
+    if sampling_mode == 'W':
+        dr = q_norm / math.sqrt(redmass)
+        pr = math.sqrt(redmass) * v_norm
+    else:
+       #Phase of vibration (angle of distance as cos(time*omega) --> cos(2pi*rnd)
+        phase = random.uniform(0, 2 * math.pi)
 
-   #Phase of vibration (angle of distance as cos(time*omega) --> cos(2pi*rnd)
-    dr_angle = random.uniform(0, 2 * math.pi)
-
-    dr = math.sqrt( 2 * ( nvib + 0.5 ) / ( redmass * omega)) * math.cos(dr_angle)
-
-    pr_angle = random.uniform(0, 2 * math.pi)
-    pr = - math.sqrt(2 * ( nvib + 0.5 ) * redmass * omega) * math.sin(pr_angle)
+        dr = math.sqrt( 2 * ( nvib + 0.5 ) / ( redmass * omega)) * math.cos(phase)
+        pr = - math.sqrt(2 * ( nvib + 0.5 ) * redmass * omega) * math.sin(phase)
      
     r = req + dr
 
@@ -142,8 +162,8 @@ def diatom_vibration_harmonic_sampling(vib_modes, req, omega, mass):
    #center of mass coordinate system: velocity is distributed
     g = mass[1] / sum(mass)
 
-    p1 = np.array([mass[0] * vr * g, 0.0, 0.0])
-    p2 = np.array([mass[1] * (vr - p1[0]/mass[0]), 0.0, 0.0])
+    p1 = np.array([pr, 0.0, 0.0])
+    p2 = np.array([-pr, 0.0, 0.0])
 
     q = np.append(q1, q2)
     p = np.append(p1, p2)
@@ -159,6 +179,3 @@ def distance_between_ij(i,j,q):
 
     dist = np.sqrt(tx*tx + ty*ty + tz*tz)
     return dist
-
-
-

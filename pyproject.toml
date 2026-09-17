@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smite"
+version = "0.1.0"
+description = "Quasiclassical trajectory and molecular dynamics toolkit for molecular collisions and unimolecular dynamics"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Peter Szabo", email = "peter88szabo@gmail.com" }
+]
+dependencies = [
+    "numpy>=1.21.0"
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+
+[project.optional-dependencies]
+analysis = ["matplotlib"]
+pyscf = ["pyscf"]
+sparrow = ["scine-sparrow"]
+gui = ["PySide6"]
+dev = ["build", "pytest"]
+all = ["matplotlib", "pyscf", "scine-sparrow", "PySide6"]
+
+[project.scripts]
+smite-gui = "smite_gui.app:main"
+
+[project.urls]
+Homepage = "https://github.com/peter88szabo/Smite"
+Repository = "https://github.com/peter88szabo/Smite"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+py-modules = ["smite"]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = [
+    "analysis*",
+    "core*",
+    "dynamics*",
+    "integrators*",
+    "normalmode*",
+    "optimizer*",
+    "parallel*",
+    "qchem_interfaces*",
+    "sampling*",
+    "smite_gui*",
+    "thermostats*",
+    "utils*",
+]
+exclude = [
+    "test*",
+    "scratch*",
+]
+
+[tool.setuptools.data-files]
+"share/smite/examples" = ["src/test*.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["src/tests"]
+python_files = ["test_*.py"]
+pythonpath = ["src"]

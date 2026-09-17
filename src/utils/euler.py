@@ -6,7 +6,7 @@ def euler_rot(qq, pp):
     #this eats the center of mass cords)
     #always before using this you need to call cenmass()
     phi   = random.uniform(0, 2 * pi)
-    theta = acos(random.uniform(0, 1))
+    theta = acos(random.uniform(-1, 1))
     chi   = random.uniform(0, 2 * pi)
 
     rxx =  cos(theta)*cos(phi)*cos(chi) - sin(phi)*sin(chi)
@@ -37,7 +37,7 @@ def euler_rot(qq, pp):
 
 def euler_rotQ(qq):
     phi   = random.uniform(0, 2 * pi)
-    theta = acos(random.uniform(0, 1))
+    theta = acos(random.uniform(-1, 1))
     chi   = random.uniform(0, 2 * pi)
 
     rxx =  cos(theta)*cos(phi)*cos(chi) - sin(phi)*sin(chi)

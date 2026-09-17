@@ -2,6 +2,7 @@ import math
 import numpy as np
 import random
 from utils.cenmass import cenmass, cenmassQ
+from utils.constants import BOHR_TO_ANGSTROM
 
 
 def orient_and_rotate_surface(surf_3atom, lab_axis, phi, q, p, mass):
@@ -201,12 +202,11 @@ if __name__ == "__main__":
     def print_trajectory(trajfile, atoms, q, angle):
         trajfile.write(str(len(atoms)) + "\n")
         trajfile.write("%8s %10.2f \n" % ("angle = ", angle))
-        au2Ang=0.5291772e0
         for i in range(0, len(atoms)):
             jx = 3 * i
             jy = 3 * i + 1
             jz = 3 * i + 2
-            trajfile.write("%3s %15.5f  %15.5f %15.5f \n" % (atoms[i], q[jx]*au2Ang, q[jy]*au2Ang, q[jz]*au2Ang))
+            trajfile.write("%3s %15.5f  %15.5f %15.5f \n" % (atoms[i], q[jx]*BOHR_TO_ANGSTROM, q[jy]*BOHR_TO_ANGSTROM, q[jz]*BOHR_TO_ANGSTROM))
 
 
     xyz_C48H18 = '''
@@ -281,16 +281,16 @@ H            5.26954348044517        0.14192510040879       0.00000000
     seed = 211422
     random.seed(seed)
 
-    c3   = 1838.6836605e0        # [g/mol]    * c3 = [electron mass unit]
+    from utils.constants import ANGSTROM_TO_BOHR, ATOMIC_MASS_GMOL_TO_AU
 
-    mH = 1.0078*c3
-    mC = 12.011*c3
-    mN = 14.007*c3
-    mO = 15.999*c3
+    mH = 1.0078 * ATOMIC_MASS_GMOL_TO_AU
+    mC = 12.011 * ATOMIC_MASS_GMOL_TO_AU
+    mN = 14.007 * ATOMIC_MASS_GMOL_TO_AU
+    mO = 15.999 * ATOMIC_MASS_GMOL_TO_AU
 
     Natoms, atoms_PAH, q_eq = parseXYZ(xyz_C48H18)
 
-    q = q_eq / 0.52917721092
+    q = q_eq * ANGSTROM_TO_BOHR
 
     mass = get_mass_vector(atoms_PAH)
 
@@ -325,15 +325,15 @@ H            5.26954348044517        0.14192510040879       0.00000000
     '''
     H2_natoms, H2_atoms, H2_q_eq = parseXYZ(xyz_H2)
     mass_H2 = get_mass_vector(H2_atoms)
-    qH2 = H2_q_eq / 0.52917721092
+    qH2 = H2_q_eq * ANGSTROM_TO_BOHR
 
     qH2 = cenmassQ(qH2, mass_H2)
 
 
     theta_vec = np.linspace(0, np.pi/2.0, 20)
     phi_vec = np.linspace(0, 2*np.pi, 36)
-    bimp = 3.0 / 0.52917721092
-    Rini = 12.0 / 0.52917721092
+    bimp = 3.0 * ANGSTROM_TO_BOHR
+    Rini = 12.0 * ANGSTROM_TO_BOHR
 
     atoms_all = atoms_PAH + H2_atoms
 
@@ -372,6 +372,4 @@ H            5.26954348044517        0.14192510040879       0.00000000
 
     trajfile.close()
     trajfile_phi.close()
-
-
 

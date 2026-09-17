@@ -3,6 +3,10 @@ import numpy as np
 import os
 from io import StringIO
 import shutil
+from utils.constants import BOHR_TO_ANGSTROM
+from qchem_interfaces.backend_common import backend_scratch_dir, command_error
+from qchem_interfaces.energy_cache import store_energy
+from qchem_interfaces.wavefunction_output import prepare_wavefunction_output, require_wavefunction_file
 
 
 def Sparrowbin_Hessian(q, atoms, qcinput):
@@ -31,8 +35,8 @@ def Sparrowbin_Hessian(q, atoms, qcinput):
 
 
 def Sparrowbin_Force(q, atoms, qcinput):
-
-    inputfile = "Sparrow_temp_geom_to_run.xyz"
+    directory = backend_scratch_dir(qcinput, 'sparrowbin', 'sparrowbin_tmp')
+    inputfile = os.path.join(directory, "Sparrow_temp_geom_to_run.xyz")
     print_structure(atoms, q, inputfile)
 
     path         =  qcinput['path']
@@ -40,17 +44,20 @@ def Sparrowbin_Force(q, atoms, qcinput):
     charge       =  qcinput['charge']
     multiplicity =  qcinput['multiplicity']
     natom        =  len(atoms)
-    arg          = "-G"
+    arg          = ["-G"]
 
-    result = callSparrowbin(inputfile, path, charge, multiplicity, method, arg, natom)
+    result = callSparrowbin(inputfile, path, charge, multiplicity, method, arg, natom, cwd=directory)
     ene = result["Energy"]
     force = -np.reshape(result["Gradient"],3*natom)
+    store_energy(qcinput, q, atoms, ene, force=force)
 
     return force
 
 
 def Sparrowbin_Energy(file_wf, q, atoms, qcinput):
-    inputfile = "Sparrow_temp_geom_to_run.xyz"
+    directory = backend_scratch_dir(qcinput, 'sparrowbin', 'sparrowbin_tmp')
+
+    inputfile = os.path.join(directory, "Sparrow_temp_geom_to_run.xyz")
     print_structure(atoms, q, inputfile)
 
     path         =  qcinput['path']
@@ -61,50 +68,61 @@ def Sparrowbin_Energy(file_wf, q, atoms, qcinput):
     wfu          =  qcinput['wfu'] #wfu for wavefunction or dipole (molden format) calculation
 
 
-    arg = "-D energ calc" #-D [ --description ] arg      ||sets a calculation description which will appear in the output
+    arg = ["-D", "energy calculation"] #-D [ --description ] arg      ||sets a calculation description which will appear in the output
                           #dummy argument (wihtout it problematic)
     if wfu:
-       arg = "-W"
+       arg = ["-W"]
 
 
-    result = callSparrowbin(inputfile, path, charge, multiplicity, method, arg, natom)
+    result = callSparrowbin(inputfile, path, charge, multiplicity, method, arg, natom, cwd=directory)
     ene = result["Energy"]
 
     if wfu:
-        sparrow_wf_file = 'wavefunction.molden.input' 
+        file_wf = prepare_wavefunction_output(file_wf, "Sparrow_bin")
+        sparrow_wf_file = os.path.join(directory, 'wavefunction.molden.input')
+        require_wavefunction_file(sparrow_wf_file, "Sparrow_bin")
         shutil.move(sparrow_wf_file, file_wf) 
 
     return ene 
 
 
-def callSparrowbin(inputfile, path, charge, multiplicity, method, arg, natom):
+def callSparrowbin(inputfile, path, charge, multiplicity, method, operation_args, natom, cwd=None):
     if not path:
-            print("Cannot determine Sparrow PATH")
-            exit()
+            raise ValueError("Cannot determine Sparrow PATH")
 
+    input_arg = os.path.basename(inputfile) if cwd is not None else inputfile
     if multiplicity == 1:
         command = [path,
-                  "-x", inputfile,
-                  "-c", str(charge),
-                  "-s", str(multiplicity),arg,
-                  "-M", method]
-    else:
-        command = [path,
-                  "-x", inputfile,
+                  "-x", input_arg,
                   "-c", str(charge),
                   "-s", str(multiplicity),
-                  "-M", method, "-u", arg]
+                  "-M", method,
+                  *operation_args]
+    else:
+        # For open-shell calculations Sparrow expects `-u` to receive the
+        # number of unpaired electrons, i.e. multiplicity - 1. The operation
+        # flag (`arg`) must stay separate; otherwise the command line is malformed.
+        command = [path,
+                  "-x", input_arg,
+                  "-c", str(charge),
+                  "-s", str(multiplicity),
+                  "-M", method,
+                  "-u", str(multiplicity - 1),
+                  *operation_args]
 
-    result = subprocess.run(command, stdout=subprocess.PIPE, text=True)
+    result = subprocess.run(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
     if result.returncode == 0:
         data = parseSparrowOutput(result.stdout, natom)
     else:
-        print("SPARROW command failed. Exit code:", result.returncode)
+        raise command_error("SPARROW", result.returncode, result.stdout, result.stderr)
     return data
 
 def parseSparrowOutput(s, N):
-    data = s.split("="*60)[1].split("Calculation:")[1]
+    try:
+        data = s.split("="*60)[1].split("Calculation:")[1]
+    except IndexError as exc:
+        raise ValueError("Could not parse SPARROW output.") from exc
     result = {}
     if "Energy" in data:
         E = data.split("Energy [hartree]:\n")[1].split("\n")[0]
@@ -116,8 +134,6 @@ def parseSparrowOutput(s, N):
     return result
 
 def print_structure(atoms, q, filename):
-    b2a = 0.52917721092
-
     with open(filename, "w") as file:
         file.write(str(len(atoms)) + "\n")
         file.write("This is a temporary strucutre for Sparrow to calculate energy and gradient\n")
@@ -125,6 +141,4 @@ def print_structure(atoms, q, filename):
             jx = 3 * i
             jy = 3 * i + 1
             jz = 3 * i + 2
-            file.write("%3s %15.5f  %15.5f %15.5f\n" % (atoms[i], q[jx] * b2a, q[jy] * b2a, q[jz] * b2a))
-
-
+            file.write("%3s %15.5f  %15.5f %15.5f\n" % (atoms[i], q[jx] * BOHR_TO_ANGSTROM, q[jy] * BOHR_TO_ANGSTROM, q[jz] * BOHR_TO_ANGSTROM))

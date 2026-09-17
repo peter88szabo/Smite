@@ -1,4 +1,5 @@
 import numpy as np
+<<<<<<< HEAD
 from numpy._typing import NDArray
 
 from integrators.verlet import velverlet
@@ -7,9 +8,22 @@ from integrators.gradient import force_calc
 
 class PredCorr:
     def __init__(self, order: int, ndim: int):
+=======
+from fractions import Fraction
+from integrators.verlet       import velverlet
+from integrators.gradient     import force_calc
+
+class PredCorr:
+    def __init__(self, order, ndim):
+        if not isinstance(order, int) or order < 1:
+            raise ValueError("Predictor-corrector order must be a positive integer")
+
+>>>>>>> ecad59b (2026)
         self.order = order
         self.ab_coeff = None
         self.am_coeff = None
+        self.am_history_coeff = None
+        self.am_predict_coeff = None
         self.step = -1
         self.save_veloc = np.zeros((order, ndim))
         self.save_force = np.zeros((order, ndim))
@@ -33,6 +47,7 @@ class PredCorr:
         elif self.step >= self.order:
             return self.call_predcorr(qcinput, dt, wmass, q, p, atoms, active_state)
 
+<<<<<<< HEAD
     def get_adbash_admoul_coeffs(self) -> None:
         """
         Coefficients for the Adams-Bashford and
@@ -63,6 +78,77 @@ class PredCorr:
         # reverse order of vector elements
         self.ab_coeff = ab_coeff[::-1]
         self.am_coeff = am_coeff[::-1]
+=======
+
+
+    @staticmethod
+    def _solve_fraction_system(matrix, rhs):
+        n = len(rhs)
+        augmented = [row[:] + [rhs[i]] for i, row in enumerate(matrix)]
+
+        for col in range(n):
+            pivot = None
+            for row in range(col, n):
+                if augmented[row][col] != 0:
+                    pivot = row
+                    break
+            if pivot is None:
+                raise ValueError("Singular Adams coefficient matrix")
+
+            if pivot != col:
+                augmented[col], augmented[pivot] = augmented[pivot], augmented[col]
+
+            scale = augmented[col][col]
+            augmented[col] = [value / scale for value in augmented[col]]
+
+            for row in range(n):
+                if row == col:
+                    continue
+                scale = augmented[row][col]
+                if scale == 0:
+                    continue
+                augmented[row] = [
+                    augmented[row][i] - scale * augmented[col][i]
+                    for i in range(n + 1)
+                ]
+
+        return [augmented[row][-1] for row in range(n)]
+
+    @classmethod
+    def _adams_coefficients(cls, offsets):
+        order = len(offsets)
+        matrix = [
+            [Fraction(offset) ** power for offset in offsets]
+            for power in range(order)
+        ]
+        rhs = [Fraction(1, power + 1) for power in range(order)]
+        return cls._solve_fraction_system(matrix, rhs)
+
+    def get_adbash_admoul_coeffs(self):
+        '''
+        Coefficients for arbitrary-order Adams-Bashforth and
+        Adams-Moulton predictor-corrector integration.
+
+        Reference:
+        Baba Seidu, Int. J. Comp. Appl. Math., 2011, Vol. 6., pp. 215-220
+        '''
+        # AB coefficients are computed newest-to-oldest:
+        # f_n, f_{n-1}, ..., f_{n-order+1}. Store them oldest-to-newest to
+        # match save_veloc/save_force history order.
+        ab_offsets = [0 - j for j in range(self.order)]
+        ab_coeff = self._adams_coefficients(ab_offsets)
+        self.ab_coeff = np.array([float(value) for value in reversed(ab_coeff)])
+
+        # AM coefficients are computed as:
+        # f_{n+1}^{pred}, f_n, f_{n-1}, ..., f_{n-order+2}.
+        # Keep the predicted endpoint coefficient separate so the history
+        # alignment is explicit and does not depend on reversed indexing.
+        am_offsets = [1 - j for j in range(self.order)]
+        am_coeff = self._adams_coefficients(am_offsets)
+        self.am_predict_coeff = float(am_coeff[0])
+        self.am_history_coeff = np.array([float(value) for value in reversed(am_coeff[1:])])
+        self.am_coeff = np.append(self.am_history_coeff, self.am_predict_coeff)
+>>>>>>> ecad59b (2026)
 
     def predcorr_initialize(
         self,
@@ -126,13 +212,19 @@ class PredCorr:
         # ----------------------------------------------------------
         sum_q = np.zeros_like(q)
         sum_p = np.zeros_like(p)
+<<<<<<< HEAD
         for j in range(1, self.order):
             sum_q += self.am_coeff[j - 1] * self.save_veloc[j, :]
             sum_p += self.am_coeff[j - 1] * self.save_force[j, :]
+=======
+        for j in range(self.order - 1):
+            sum_q += self.am_history_coeff[j] * self.save_veloc[j + 1, :]
+            sum_p += self.am_history_coeff[j] * self.save_force[j + 1, :]
+>>>>>>> ecad59b (2026)
 
-        # The last segment with updated force and momentum from the predictor step
-        sum_q += self.am_coeff[-1] * p_pred / wmass
-        sum_p += self.am_coeff[-1] * force_pred
+        # Predicted endpoint derivative f_{n+1}^{pred}.
+        sum_q += self.am_predict_coeff * p_pred / wmass
+        sum_p += self.am_predict_coeff * force_pred
 
         q_new = q_old + sum_q * dt
         p_new = p_old + sum_p * dt

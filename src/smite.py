@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 from typing import Optional
 
 import numpy as np
@@ -1912,3 +1913,12 @@ class Collision(Molecule):
                 de_cutoff=de_cutoff,
                 tolerance=tolerance,
             )
+=======
+from core.molecule import Molecule
+from core.fragment import Fragment
+from core.collision import Collision
+
+__version__ = "0.1.0"
+
+__all__ = ["Molecule", "Fragment", "Collision"]
+>>>>>>> ecad59b (2026)

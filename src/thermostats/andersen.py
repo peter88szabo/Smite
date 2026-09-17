@@ -1,5 +1,6 @@
 import numpy as np
 import random
+from utils.constants import R_GAS_HARTREE_PER_K
 
 def thermo_andersen(nfix, p, wmass, dt, prob, Ttarg):
     """
@@ -15,7 +16,7 @@ def thermo_andersen(nfix, p, wmass, dt, prob, Ttarg):
     But we calculate here momenta instead of velocities
     """
 
-    RT = (8.3144598/1000.0/2625.5) * Ttarg  #Rgas in Hartree/K
+    RT = R_GAS_HARTREE_PER_K * Ttarg
 
     if random.uniform(0.0,1.0) < prob*dt :
        for i in range(len(p)-nfix):
@@ -61,5 +62,4 @@ def thermo_andersen(nfix, p, wmass, dt, prob, Ttarg):
 
   end subroutine andersen
 '''
-
 

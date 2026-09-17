@@ -1,135 +1,60 @@
 import numpy as np
 
-class MDNose:
-    def __init__(self):
-        self.nc = 0
-        self.pi = None
-        self.xi = None
-        self.nhq = 0.0
-        self.onq = 0.0
-        self.nhcham = 0.0
+from utils.constants import R_GAS_HARTREE_PER_K
 
-    def nhc_init(self, nchain, wopt, kt, ndim, seed=42):
-        """
-        Initialize the Nosé-Hoover chain.
-        
-        Parameters:
-            nchain (int): Number of chains.
-            wopt (float): Optimized frequency.
-            kt (float): Boltzmann constant times temperature.
-            ndim (int): Number of dimensions.
-            seed (int): Seed for random number generator for reproducibility.
-        """
-        np.random.seed(seed)
-        self.nc = nchain
-        self.pi = np.zeros((self.nc, ndim))
-        self.xi = np.zeros((self.nc, ndim))
 
-        self.nhq = kt / (wopt ** 2)
-        self.onq = 1.0 / self.nhq
+class NoseHoover:
+    """
+    Mass-aware single Nose-Hoover thermostat for Smite momenta.
 
-        # Initialize `pi` with Gaussian-distributed random values
-        self.pi = np.random.normal(0, np.sqrt(kt), (self.nc, ndim))
-        self.nhcham = 0.0  # Reset the conserved quantity accumulator
+    Smite stores Cartesian momenta p and computes kinetic energy as
+    sum(p_i**2 / m_i) / 2.  The thermostat variable therefore couples to
+    2*K - g*kT, not to p_i**2 - kT for unit masses.
+    """
 
-    def nhc_step(self, p, fulldt, mts, kt, ndim):
-        """
-        Perform a Nosé-Hoover chain step.
-        
-        Parameters:
-            p (numpy array): Momentum vector.
-            fulldt (float): Full time step.
-            mts (int): Number of multi-time step subdivisions.
-            kt (float): Boltzmann constant times temperature.
-            ndim (int): Number of dimensions.
-        
-        Returns:
-            p (numpy array): Updated momentum vector.
-        """
-        dt = fulldt / mts
-        dt2 = 0.5 * dt
+    def __init__(self, nfix, wmass, tau, target_temp):
+        if tau <= 0.0:
+            raise ValueError("Nose-Hoover thermostat coupling time must be positive")
+        if target_temp <= 0.0:
+            raise ValueError("Nose-Hoover thermostat temperature must be positive")
 
-        for j in range(ndim):
-            for k in range(mts):
-                # Evolve p
-                b = self.onq * self.pi[0, j]
-                a = b * dt2
-                self.xi[0, j] += a
-                p[j] *= np.exp(-a)
+        self.nfix = int(nfix)
+        self.wmass = np.asarray(wmass, dtype=float)
+        self.ndof = len(self.wmass) - self.nfix
+        if self.ndof <= 0:
+            raise ValueError("Number of active degrees of freedom must be positive")
 
-                # Half time-step on odd xi's and even pi's
-                c = b * self.pi[0, j] - kt
-                for i in range(2, self.nc, 2):
-                    b = self.onq * self.pi[i, j]
-                    a = b * dt2
-                    self.xi[i, j] += a
-                    if b == 0.0:
-                        self.pi[i - 1, j] += c * dt2
-                    else:
-                        c = c / b
-                        self.pi[i - 1, j] = c + (self.pi[i - 1, j] - c) * np.exp(-a)
-                    c = b * self.pi[i, j] - kt
+        self.kt = R_GAS_HARTREE_PER_K * target_temp
+        self.qmass = self.ndof * self.kt * tau * tau
+        self.xi = 0.0
 
-                if self.nc % 2 == 0:
-                    self.pi[self.nc - 1, j] += c * dt2
+    def _active_slice(self):
+        if self.nfix == 0:
+            return slice(None)
+        return slice(0, -self.nfix)
 
-                # Full time step on odd pi's and even xi's
-                c = p[j] ** 2 - kt  # Assuming mass = 1
-                if self.nc == 1:
-                    self.pi[0, j] += c * dt
-                else:
-                    for i in range(1, self.nc, 2):
-                        b = self.onq * self.pi[i, j]
-                        a = b * dt
-                        self.xi[i, j] += a
-                        if b == 0.0:
-                            self.pi[i - 1, j] += c * dt
-                        else:
-                            c = c / b
-                            self.pi[i - 1, j] = (self.pi[i - 1, j] - c) * np.exp(-a) + c
-                        c = b * self.pi[i, j] - kt
+    def kinetic_energy(self, p):
+        active = self._active_slice()
+        p_active = np.asarray(p, dtype=float)[active]
+        wmass_active = self.wmass[active]
+        return 0.5 * np.sum(p_active * p_active / wmass_active)
 
-                    if self.nc % 2 != 0:
-                        self.pi[self.nc - 1, j] += c * dt
+    def step(self, p, dt):
+        p = np.asarray(p, dtype=float)
+        active = self._active_slice()
 
-                # Evolve p again
-                b = self.onq * self.pi[0, j]
-                a = b * dt2
-                self.xi[0, j] += a
-                p[j] *= np.exp(-a)
+        kinetic = self.kinetic_energy(p)
+        self.xi += 0.5 * dt * (2.0 * kinetic - self.ndof * self.kt) / self.qmass
 
-                # Half time-step on odd xi's and even pi's
-                c = b * self.pi[0, j] - kt
-                for i in range(2, self.nc, 2):
-                    b = self.onq * self.pi[i, j]
-                    a = b * dt2
-                    self.xi[i, j] += a
-                    if b == 0.0:
-                        self.pi[i - 1, j] += c * dt2
-                    else:
-                        c = c / b
-                        self.pi[i - 1, j] = c + (self.pi[i - 1, j] - c) * np.exp(-a)
-                    c = b * self.pi[i, j] - kt
+        p[active] *= np.exp(-self.xi * dt)
 
-                if self.nc % 2 == 0:
-                    self.pi[self.nc - 1, j] += c * dt2
+        kinetic = self.kinetic_energy(p)
+        self.xi += 0.5 * dt * (2.0 * kinetic - self.ndof * self.kt) / self.qmass
 
         return p
 
-    def nhc_cons(self, kt, ndim):
-        """
-        Compute the Nosé-Hoover chain conserved quantity.
-        
-        Parameters:
-            kt (float): Boltzmann constant times temperature.
-            ndim (int): Number of dimensions.
-        
-        Returns:
-            nhcham (float): Conserved quantity for Nosé-Hoover chain.
-        """
-        self.nhcham = 0.0
-        for j in range(ndim):
-            for i in range(self.nc):
-                self.nhcham += 0.5 * self.pi[i, j] ** 2 * self.onq + kt * self.xi[i, j]
-        return self.nhcham
 
+def thermo_nosehoover(nfix, p, wmass, dt, tau, Ttarg, state=None):
+    if state is None:
+        state = NoseHoover(nfix=nfix, wmass=wmass, tau=tau, target_temp=Ttarg)
+    return state.step(p, dt), state

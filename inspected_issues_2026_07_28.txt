@@ -1,0 +1,100 @@
+ I inspected the current worktree. The harmonic vibrational core is sound, but the code is not yet reliable for production state-resolved QCT because rotational
+  initialization and final-state energy analysis contain major correctness errors.
+
+  ## Prioritized findings
+
+  1. Polyatomic rotational sampling does not realize the requested (J).
+
+     The inertia tensor uses positive off-diagonal elements in src/sampling/polyrotation.py:30; physically these are (-\sum m_ix_iy_i), etc. The resulting inverse
+     tensor is then used to add rotational momenta at src/sampling/polyrotation.py:186.
+
+     A numerical check requesting (J=7), hence (|J|=\sqrt{56}=7.4833), produced (|J_{\mathrm{actual}}|=24.4411), with vector error 20.06 a.u. Thermal rotation also
+     treats principal-axis components as laboratory-frame components because the eigenvectors are discarded. This affects essentially every rotating polyatomic initial
+     state.
+
+  2. The post-collision “vibrational energy” is not vibrational energy.
+
+     src/analysis/fragment_energy.py:142 calculates
+
+     [
+     E_\mathrm{vib}=K_\mathrm{internal}-E_\mathrm{rot},
+     ]
+
+     omitting the fragment’s vibrational potential energy. Consequently this quantity cannot be used for product vibrational-state assignment or quantum binning. The
+     current analysis provides useful kinematic vectors, but it does not make the calculation product-state resolved.
+
+  3. Random molecular orientations and fixed-(J) directions are biased.
+
+     src/utils/euler.py:8 samples (\cos\theta\in[0,1]), restricting a body-fixed axis to one hemisphere. A 10,000-orientation check gave the rotated body-(z) component
+     strictly between 0 and 1, with mean 0.502.
+
+     Fixed-(J) polyatomic sampling independently uses (\theta\sim U(0,\pi)) at src/sampling/polyrotation.py:155, whereas an isotropic vector requires (\cos\theta\sim
+     U(-1,1)). These biases can alter steric factors, differential cross sections, and vector correlations.
+
+  4. Linear polyatomic initialization is broken despite the linear=True option.
+
+     The Eckart projector always constructs six translation/rotation vectors and directly inverts their Gram matrix at src/normalmode/eckart.py:35. For a linear
+     molecule one rotation is null, making this matrix singular. A CO₂-like test failed with LinAlgError: Singular matrix.
+
+     Normal-mode filtering also hard-codes six discarded modes at src/normalmode/normalmode.py:72 and src/normalmode/normalmode.py:90, although linear molecules require
+     five.
+
+  5. Diatomic vibrational and rotational options interfere.
+
+     For a harmonic diatom, requesting ZPE vibration plus thermal rotation:
+
+     Specify_Mode_Sampling(
+         init_vib_type="ZPE",
+         init_rot_type="Temp",
+         temp=300,
+     )
+
+     silently changes the vibration to thermal sampling. The branch at src/core/fragment.py:362 chooses the vibrational method based on which keyword happens to be
+     present, so rotational temp is interpreted as vibrational temp. My check returned ('T', 300.0) rather than the requested ground state.
+
+  6. The meaning of thermal collision-energy sampling is ambiguous.
+
+     src/sampling/thermal.py:7 samples
+
+     [
+     E=-RT\ln(\xi_1\xi_2),
+     ]
+
+     giving a gamma distribution with mean (2RT), confirmed numerically. This is the flux-weighted collision-energy distribution. It is not the equilibrium relative
+     translational distribution, whose mean is (3RT/2). The API and supporting text currently call it Maxwell–Boltzmann without specifying flux weighting; the intended
+     ensemble should be explicit and selectable.
+
+  7. Oblique molecule–surface impact parameters are geometrically inconsistent.
+
+     In src/core/collision.py:388, the displacement (b) is added along the same in-plane direction that contributes to the incident velocity. At incidence angle
+     (\theta), the actual perpendicular impact parameter becomes (b\cos\theta), not (b), and the actual COM separation is no longer Rini.
+
+  8. Scientific regression coverage is effectively absent.
+
+     All 98 Python files parse successfully, but pytest finds no configured src/tests directory and falls back to collecting PES scripts, which fail because compiled
+     shared libraries are absent. There are no automated invariant tests for:
+      - recovered normal-mode energies;
+      - requested versus realized angular momentum;
+      - isotropic orientation distributions;
+      - COM momentum removal;
+      - exact collision energy and impact parameter;
+      - linear molecules;
+      - deterministic, distinct parallel random streams.
+
+     Parallel template workers also ignore the trajectory index when cloning at src/parallel/trajectory_runner.py:479, with no trajectory-specific seed derivation.
+
+  ## Parts that look correct
+
+  - Fixed-energy harmonic normal-mode amplitude and phase sampling.
+  - Ground-state harmonic Wigner variances.
+  - Thermal harmonic vibrational quantum-number sampling.
+  - Harmonic diatomic coordinate/momentum transformation.
+  - Gas-phase fixed collision-energy kinematics.
+  - Area-uniform (b=b_{\max}\sqrt{\xi}) sampling.
+  - Back-projection diagnostics for harmonic polyatomic modes.
+
+  I made no file changes. I would fix the inertia tensor/frame transformation first, then orientation sampling, linear-mode projection, and diatomic option dispatch.
+  After those, final-state energy decomposition and quantum binning need a separate design if “state resolved” includes product states.
+
+ 
+

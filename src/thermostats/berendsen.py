@@ -1,5 +1,6 @@
 import numpy as np
 import random
+from utils.constants import R_GAS_HARTREE_PER_K
 
 def traj_temperature(nfix, p, wmass):
     '''
@@ -12,16 +13,18 @@ def traj_temperature(nfix, p, wmass):
     nfix is used for the number of the fixeddegrees of freedom
     (e.g. nfix=3, if translational modes are frozen)
     '''
-    Rgas = (8.3144598/1000.0/2625.5) #in Hartree/K
-
     Ekin=sum(p*p/wmass)*0.5
 
-    return 2.0*Ekin/float(len(p)-nfix)/Rgas
+    ndof = len(p) - nfix
+    if ndof <= 0:
+        raise ValueError("Number of active degrees of freedom must be positive in traj_temperature()")
+
+    return 2.0*Ekin/float(ndof)/R_GAS_HARTREE_PER_K
 
 
 def thermo_berendsen(nfix, p, wmass, dt, tau, Ttarg):
     '''
-    Berendsen thermostate
+    Berendsen thermostat
     Ttarg = target temperature
     tau = time constant,scaling (coupling) parameter
     tau has to be: tau > dt

@@ -64,7 +64,6 @@ def add_matrix_and_get_index(new_matrix, new_q, matrices_list, q_list):
 if __name__ == '__main__':
    from clustering import cluster_chemical_formulas
    from format_and_print import parseXYZ
-   b2a = 0.52917721092
 
    xyz0 = '''
     O        -2.56261          1.12272         1.01919 
@@ -189,7 +188,5 @@ O         7.23978         -1.84586         3.82761
 #  try adding a previous element of the list:
    channel, product_connect_list, product_coord_list = add_matrix_and_get_index(connect_0, q_0, prod_con_list, prod_q_list)
    print("product channel: ", channel, "   length: ", len(prod_q_list), "  formula: ", cluster_chemical_formulas(q_0, atoms_0, eps, minPts))
-
-
 
 
