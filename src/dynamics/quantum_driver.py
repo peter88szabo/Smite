@@ -28,11 +28,15 @@ def _validate_name(name):
 
 
 def initialize_quantum_propagator(name, num_states, active_state,
-                                  atoms=None, state_qcinput=None, de_cutoff=0.5):
+                                  atoms=None, state_qcinput=None, de_cutoff=0.5,
+                                  de_corr=0.0, n_substeps=None, hop_gap_max=None):
     """Build the quantum propagator and register the surfaces it runs on.
 
     Returns ``None`` when ``name`` is ``None``, which is what leaves an ordinary
     single-surface trajectory untouched.
+
+    ``de_corr`` is the strength in Hartree of the energy-based decoherence
+    correction; 0, the default, leaves plain fewest-switches surface hopping.
     """
     if name is None:
         return None
@@ -63,8 +67,20 @@ def initialize_quantum_propagator(name, num_states, active_state,
     from fssh.fssh import FSSH
     from fssh.pes_adapter import configure_states
 
+    if de_corr < 0.0:
+        raise ValueError("de_corr is a decoherence strength in Hartree and cannot "
+                         "be negative; use 0 to disable the correction")
+
     configure_states(atoms, state_qcinput)
-    return FSSH(num_states, active_state, de_cutoff)
+    if n_substeps is not None and int(n_substeps) < 1:
+        raise ValueError("n_substeps is a count of electronic sub-steps per "
+                         "classical step and must be at least 1")
+    if hop_gap_max is not None and hop_gap_max <= 0.0:
+        raise ValueError("hop_gap_max is an energy gap in Hartree and must be "
+                         "positive; use None to allow hops across any gap")
+
+    return FSSH(num_states, active_state, de_cutoff, de_corr,
+                n_substeps=n_substeps, hop_gap_max=hop_gap_max)
 
 
 def apply_quantum_integrator(molecule, name, dt, dtq=None, propagator=None):
@@ -114,3 +130,15 @@ def apply_quantum_integrator(molecule, name, dt, dtq=None, propagator=None):
 
         surface = get_states().qcinput(molecule.active_state)
         molecule.qchem = {**(molecule.qchem or {}), **surface}
+
+    # Recorded every step so an ensemble can be checked for internal
+    # consistency afterwards: the fraction of trajectories on a state should
+    # track the average population of that state, and a drift between them is
+    # the signature of missing decoherence.
+    if hasattr(molecule, "active_state_history"):
+        import numpy as np
+
+        molecule.active_state_history.append(int(molecule.active_state))
+        molecule.population_history.append(
+            np.abs(np.asarray(propagator.c)) ** 2
+        )

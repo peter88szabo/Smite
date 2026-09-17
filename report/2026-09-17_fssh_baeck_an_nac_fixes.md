@@ -2,8 +2,8 @@
 
 **Date:** 2026-09-17
 **Scope:** `src/fssh/baeck_an_nac.py`, `src/fssh/fssh.py`, `src/dynamics/quantum_driver.py`
-**Status:** fixed. Covered by 29 tests across `test_baeck_an_nac.py`, `test_fssh_propagation.py`
-and `test_fssh_wiring.py`. Full suite **260 passed, 0 failed**.
+**Status:** fixed. Covered by 40 tests across `test_baeck_an_nac.py`, `test_fssh_propagation.py`
+and `test_fssh_wiring.py`. Full suite **364 passed, 0 failed**.
 
 ---
 
@@ -25,12 +25,13 @@ several robustness gaps that could corrupt a trajectory silently.
 | 5 | `dtq` was interpreted in atomic units while `timestep` is in femtoseconds | Wrong quantum timestep | fixed |
 | 6 | Division by a vanishing gap unguarded | Possible `inf`/`nan` | fixed |
 | 7 | Hop probabilities not bounded by one; a hop became certain every sub-step | **Wrong branching** | fixed |
-| 8 | `SyntaxWarning` from LaTeX in a non-raw docstring | Cosmetic | fixed |
+| 8 | No decoherence correction; the amplitudes stayed coherent indefinitely | **Overcoherent branching** | added |
+| 9 | `SyntaxWarning` from LaTeX in a non-raw docstring | Cosmetic | fixed |
 
 None of these raise an exception on their own. They produce plausible-looking
 hopping statistics that are wrong, which is why each now has a regression test.
 
-Items 1, 3, 4, 6, 7 and 8 are in upstream code. Item 5 was introduced by the wiring
+Items 1, 3, 4, 6, 7 and 9 are in upstream code. Item 8 was a stub upstream left empty. Item 5 was introduced by the wiring
 added when the module was ported onto Smite's `pesrun` backend.
 
 ---
@@ -322,7 +323,66 @@ be repeated with a smaller quantum timestep rather than trusted.
 
 ---
 
-## 10. What was audited and found correct
+## 10. Bug 8 -- no decoherence correction
+
+### What was wrong
+
+`_decoherence()` was an empty stub. Fewest-switches surface hopping propagates
+the electronic amplitudes coherently along one classical trajectory, so
+coherences that the separation of nuclear wavepackets ought to destroy survive
+indefinitely. The populations then drift away from the fraction of trajectories
+actually running on each state -- the internal-consistency failure of plain FSSH
+-- and the branching ratios drift with them.
+
+### What was added
+
+The energy-based decoherence correction of Granucci and Persico. For every state
+`k` other than the active state `a`, in atomic units:
+
+```
+tau_k    = (1 + C / E_kin) / |E_k - E_a|
+c_k     <- c_k * exp(-dtq / tau_k)
+|c_a|^2 <- 1 - sum_{k != a} |c_k|^2
+```
+
+so the population of an inactive state decays as `exp(-2 dtq / tau_k)`. Both
+factors shorten `tau`: a large energy gap, and fast nuclei, since a large
+`E_kin` shrinks the `C / E_kin` term towards the bare `hbar / |E_k - E_a|`. A
+motionless system has a diverging `tau` and is left alone. `C` defaults to 0.1
+Hartree, the value recommended in the paper.
+
+Applied inside the quantum sub-step loop, after the unitary propagation, so the
+coherent step and the damping do not interleave.
+
+### Amplitudes rather than the density matrix
+
+The correction is published as a transformation of `rho`, with four cases: the
+inactive populations, the active population, the coherences among inactive
+states, and the coherences between the active state and the rest, which pick up
+a `sqrt(rho_aa' / rho_aa)` factor.
+
+Smite stores amplitudes, and with `rho_ij = c_i conj(c_j)` the two-line update
+above reproduces all four exactly. That is asserted rather than assumed:
+`test_the_amplitude_form_matches_the_density_matrix_transformation` writes the
+density-matrix form out element by element and checks agreement to 1e-12.
+
+### Off by default
+
+`de_corr` defaults to 0, which leaves plain FSSH and changes no existing result.
+`de_corr=0.1` switches the correction on. A negative value is rejected rather
+than silently treated as zero.
+
+### Verified
+
+Eleven tests: the analytic `exp(-2 dtq / tau)` decay law; trace conservation;
+that the population lost by the inactive states lands exactly on the active one;
+the gap and kinetic-energy dependences in the right direction; both divergence
+guards; that repeated application drives the active state to one; and the
+density-matrix equivalence above.
+
+---
+
+## 11. What was audited and found correct
 
 Not everything suspicious turned out to be a bug. The following were checked in
 detail and are right as written:
@@ -347,24 +407,24 @@ detail and are right as written:
 
 ---
 
-## 11. Files changed
+## 12. Files changed
 
 | File | Change |
 | --- | --- |
 | `src/fssh/baeck_an_nac.py` | outer product; `eigh` with positive-curvature guard; `previous_nac` for sign continuity; `MINIMUM_GAP` guard; raw docstring |
-| `src/fssh/fssh.py` | unitary `exp(-iH dtq)` propagator replacing RK4; new `_effective_hamiltonian`; hop probabilities rescaled to at most one with a warning; `_get_couplings` gained `previous` and forwards it; `__call__` passes `self.d` |
-| `src/dynamics/quantum_driver.py` | converts `dtq` from femtoseconds to atomic units |
+| `src/fssh/fssh.py` | unitary `exp(-iH dtq)` propagator replacing RK4; new `_effective_hamiltonian`; hop probabilities rescaled to at most one with a warning; energy-based decoherence correction replacing the empty `_decoherence` stub; `_get_couplings` gained `previous` and forwards it; `__call__` passes `self.d` |
+| `src/dynamics/quantum_driver.py` | converts `dtq` from femtoseconds to atomic units; exposes `de_corr` |
 | `src/tests/test_baeck_an_nac.py` | new, 7 tests |
-| `src/tests/test_fssh_propagation.py` | new, 15 tests |
+| `src/tests/test_fssh_propagation.py` | new, 26 tests |
 | `src/tests/test_fssh_wiring.py` | 2 tests added for the `dtq` unit convention; the trajectory test seeded and retuned |
 
 The hop selection, frustrated-hop test and velocity rescaling are untouched.
 
 ---
 
-## 12. Verification
+## 13. Verification
 
-- Full suite: **260 passed, 0 failed**.
+- Full suite: **364 passed, 0 failed**.
 - Electronic norm conserved to `1e-12` or better at couplings and timesteps
   where Runge-Kutta produced NaN.
 - FSSH trajectory on `peslib/H2O+Kr+`, 80 steps: norm `1.0000000000`, energy
@@ -377,37 +437,34 @@ The hop selection, frustrated-hop test and velocity rescaling are untouched.
 
 ---
 
-## 13. Known remaining limitations
+## 14. Known remaining limitations
 
 Not fixed, because they are design choices rather than defects.
 
-1. **No decoherence correction.** `_decoherence()` is an empty stub. Plain FSSH
-   is known to overcohere; an energy-based decoherence correction (Granucci and
-   Persico) is the usual remedy and is the most valuable next addition.
-2. **Couplings and energies are frozen across the classical step.** Tully's
+1. **Couplings and energies are frozen across the classical step.** Tully's
    formulation interpolates `E` and `v.d` between their values at the start and
    end of the nuclear step. Here the values from the start of the step are held
    for all quantum sub-steps. Adding interpolation needs the couplings evaluated
    after the nuclear move as well, i.e. a restructure of the step.
-3. **`de_cutoff` default is effectively inert.** Compared against gaps in
+2. **`de_cutoff` default is effectively inert.** Compared against gaps in
    Hartree but defaulting to `0.5`, which is 13.6 eV. The `H2O+Kr+` gap is about
    0.03 Hartree, so the branch that skips the per-state Hessians never fires.
    Either the default is meant to be eV, or it should be around 0.02 Hartree.
    Changing it changes results, so it was left alone.
-4. **Hessians of every state, every step**, wherever the gap is below the cutoff.
+3. **Hessians of every state, every step**, wherever the gap is below the cutoff.
    Cheap autograd on the machine-learned surfaces; prohibitive against an ab
    initio backend. This is why the module is wired to a PES backend.
-5. **Scope of the approximation.** Two states, same symmetry, avoided crossing.
+4. **Scope of the approximation.** Two states, same symmetry, avoided crossing.
    The `H2O+Kr+` models are labelled `ci_soc`, so if the states of interest are
    spin-orbit mixed rather than same-symmetry, Baeck-An is outside its stated
    domain and should be checked against a reference method.
-6. **Frustrated-hop reversal criterion.** `_check_reverse_velocity` uses the
+5. **Frustrated-hop reversal criterion.** `_check_reverse_velocity` uses the
    active-state force in both of its two conditions. Some formulations of the
    Jasper-Truhlar criterion use the *target*-state force in the second. Worth
    checking against the cited paper; left as written.
 ---
 
-## 14. References
+## 15. References
 
 Cited from memory; worth confirming before quoting in a paper.
 
@@ -423,3 +480,5 @@ Cited from memory; worth confirming before quoting in a paper.
   (2016) -- cited for clamping negative hopping probabilities.
 - A. W. Jasper, D. G. Truhlar, *Chem. Phys. Lett.* **369**, 60 (2003) --
   frustrated-hop velocity reversal.
+- G. Granucci, M. Persico, *J. Chem. Phys.* **126**, 134114 (2007) --
+  energy-based decoherence correction.

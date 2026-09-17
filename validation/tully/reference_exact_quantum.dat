@@ -1,0 +1,25 @@
+# Exact quantum reference for Tully model I (simple avoided crossing).
+#
+# Grid-based nonadiabatic wavepacket propagation on the same diabatic
+# Hamiltonian: A=0.01, B=1.6, C=0.005, D=1.0, reduced mass 2000 a.u. The packet
+# starts on the lower adiabatic surface at x=-6 moving right; the populations
+# below are converged to five decimals over the last output points.
+#
+# Produced by validation/tully/wavepacket, which is the code from this Dropbox
+# library rebuilt with two corrections: an off-by-one in the FFT momentum grid,
+# and double precision throughout. See wavepacket/CHANGES.md.
+#
+# The number of steps is chosen per momentum so the packet never reaches the
+# periodic boundary. This matters: the earlier saved runs used a fixed step
+# count, and at k=30 and above the packet wrapped around and re-entered from
+# the far side, which corrupted the result. A previously recorded value of
+# 0.44392 at k=45.166 was contaminated this way; the clean value is 0.85871.
+#
+# k_ini   nstep   population_lower   population_upper
+   8.000   4000       0.93896            0.06104
+  10.000   4000       0.84479            0.15521
+  12.000   4000       0.78124            0.21876
+  15.000   4000       0.67696            0.32304
+  20.000   4000       0.50699            0.49301
+  30.000   2000       0.28572            0.71428
+  45.166   1200       0.14129            0.85871

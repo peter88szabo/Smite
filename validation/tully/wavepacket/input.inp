@@ -1,0 +1,8 @@
+        2                                   nstate
+        2048   -40.0  40.0                  ngrid, xmin, xmax
+
+        4000     1.0    50                  nstep, dt, nwrite
+
+        7   1    -6.0   2000.0              nE, istate_ini, xcenter_ini, redmass
+
+        8.0  10.0  12.0  15.0  20.0  30.0  45.166    (k_ini_array(i),i=1,nE)

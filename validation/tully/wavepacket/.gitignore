@@ -1,0 +1,12 @@
+# Build products and run output: rebuild with `make`, rerun with input.inp
+wavepacket.x
+*.o
+*.mod
+fort.*
+Population_*.dat
+WF_traj_*.dat
+Normalization_*.dat
+Checkpoint_*.dat
+Initial_wavepacket_*.dat
+Kinetic_operator_*.dat
+*.log

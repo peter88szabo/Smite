@@ -10,9 +10,18 @@ from .pes_adapter import PES_Energy, PES_Force, PES_Hessian
 from .baeck_an_nac import calculate_nac
 
 class FSSH:
-    def __init__(self, num_states: int, active_state: int, de_cutoff: float = 0.5) -> None:
+    def __init__(self, num_states: int, active_state: int, de_cutoff: float = 0.5,
+                 de_corr: float = 0.0, n_substeps: Optional[int] = None,
+                 hop_gap_max: Optional[float] = None) -> None:
        self.c = self._initialize_amplitudes(num_states, active_state)
        self.de_cutoff = de_cutoff
+       # Energy-based decoherence strength in Hartree; 0 leaves plain FSSH.
+       self.de_corr = de_corr
+       # Electronic sub-steps per classical step. Setting the count rather than
+       # a quantum timestep cannot be expressed in the wrong time unit.
+       self.n_substeps = n_substeps
+       # Largest adiabatic gap, in Hartree, a hop is allowed to cross.
+       self.hop_gap_max = hop_gap_max
        self.d: Optional[NDArray] = None
 
     def __call__(
@@ -54,9 +63,22 @@ class FSSH:
         tuple[NDArray[float64], NDArray[complex128], int]
             New atomic momenta, quantum amplitudes, and active state.
         """
-        dtq = dtq if dtq is not None else dtc * 1e-1
-        # Define the number of quantum steps per classical step
-        num_step = int(dtc / dtq)
+        # A sub-step count is unambiguous; a quantum timestep has to agree with
+        # the unit of the classical one, which is easy to get wrong. When both
+        # are given the count wins.
+        if self.n_substeps is not None:
+            num_step = int(self.n_substeps)
+            if num_step < 1:
+                raise ValueError("n_substeps must be at least 1")
+            dtq = dtc / num_step
+        else:
+            dtq = dtq if dtq is not None else dtc * 1e-1
+            num_step = int(dtc / dtq)
+            if num_step < 1:
+                raise ValueError(
+                    "dtq is larger than the classical timestep, so no electronic "
+                    "sub-step would be taken; check that both use the same unit"
+                )
 
         # Initialize the hopped state to -1, no hop has occured
         hopped_state = -1
@@ -79,8 +101,17 @@ class FSSH:
         # Propagate the quantum system and check for hops
         for _ in range(num_step):
             self.c, hopped_state = _quantum_step(
-                v, self.c, self.d, epot, num_states, active_state, hopped_state, dtq
+                v, self.c, self.d, epot, num_states, active_state, hopped_state, dtq,
+                mass=mass, de_corr=self.de_corr,
             )
+
+        # A hop selected across a very large gap is almost always a numerical
+        # artefact of the coupling rather than real population transfer. It
+        # would usually be rejected on energy grounds anyway, but only after the
+        # frustrated-hop machinery has run, so discard it up front.
+        if hopped_state != -1 and self.hop_gap_max is not None:
+            if abs(epot[hopped_state] - epot[active_state]) > self.hop_gap_max:
+                hopped_state = -1
 
         # Check if the hop is energetically allowed
         if hopped_state != -1:
@@ -200,6 +231,8 @@ def _quantum_step(
     active_state: int,
     hopped_state: int,
     dtq: float,
+    mass: NDArray[float64] = None,
+    de_corr: float = 0.0,
 ) -> tuple[NDArray[complex128], int]:
     """
     Perform a single quantum timestep.
@@ -233,6 +266,12 @@ def _quantum_step(
         hopped_state = _check_hop(hop_prob, num_states, active_state)
 
     c = _update_c(v, c, d, num_states, epot, dtq)
+
+    # Applied after the unitary propagation, so the coherent step and the
+    # damping do not interleave.
+    if de_corr > 0.0 and mass is not None:
+        c = _decoherence(c, epot, v, mass, active_state, dtq, de_corr)
+
     return c, hopped_state
 
 
@@ -359,10 +398,52 @@ def _update_c(
 
     # H is Hermitian, so exp(-i H dtq) is unitary by construction and the
     # electronic norm is conserved to machine precision for any dtq.
+    if num_states == 2:
+        return _two_state_propagation(hamiltonian, c, dtq)
+
     eigenvalues, eigenvectors = eigh(hamiltonian)
     phases = np.exp(-1.0j * eigenvalues * dtq)
 
     return eigenvectors @ (phases * (eigenvectors.conj().T @ c))
+
+
+def _two_state_propagation(
+    hamiltonian: NDArray[complex128], c: NDArray[complex128], dtq: float
+) -> NDArray[complex128]:
+    """``exp(-i H dtq) c`` for two states, in closed form.
+
+    Any 2x2 Hermitian matrix decomposes as ``H = a I + r . sigma`` over the
+    Pauli matrices, and since ``(r . sigma)^2 = |r|^2 I`` the exponential
+    terminates::
+
+        exp(-i H t) = exp(-i a t) [ cos(|r| t) I - i sin(|r| t) (r . sigma)/|r| ]
+
+    Exact, not an approximation, and it avoids calling a general eigensolver on
+    a 2x2 matrix once per quantum sub-step. The LAPACK wrapper overhead
+    dominates a problem this small: on a model trajectory this was three
+    quarters of the total runtime.
+    """
+    a = 0.5 * (hamiltonian[0, 0] + hamiltonian[1, 1]).real
+    rx = hamiltonian[0, 1].real
+    ry = -hamiltonian[0, 1].imag
+    rz = 0.5 * (hamiltonian[0, 0] - hamiltonian[1, 1]).real
+
+    r = np.sqrt(rx * rx + ry * ry + rz * rz)
+    overall = np.exp(-1.0j * a * dtq)
+
+    if r < 1.0e-30:
+        # Degenerate and uncoupled: nothing but the overall phase.
+        return overall * c
+
+    cosine = np.cos(r * dtq)
+    factor = -1.0j * np.sin(r * dtq) / r
+
+    # (cos I - i sin (r.sigma)/|r|) applied to c, written out.
+    c0, c1 = c[0], c[1]
+    out = np.empty(2, dtype=complex128)
+    out[0] = overall * (cosine * c0 + factor * (rz * c0 + (rx - 1.0j * ry) * c1))
+    out[1] = overall * (cosine * c1 + factor * ((rx + 1.0j * ry) * c0 - rz * c1))
+    return out
 
 
 def _effective_hamiltonian(
@@ -625,5 +706,91 @@ def _check_reverse_velocity(
     return False
 
 
-def _decoherence():
-    pass
+# Below these values the energy-based decay time diverges: a vanishing gap or a
+# momentarily motionless system. Substituting a time long enough that the
+# correction does nothing over any realistic step keeps the expression finite.
+MINIMUM_KINETIC_ENERGY = 1.0e-8
+MINIMUM_DECOHERENCE_GAP = 1.0e-9
+LONG_DECAY_TIME = 1.0e7
+
+
+def _decoherence(
+    c: NDArray[complex128],
+    epot: NDArray[float64],
+    v: NDArray[float64],
+    mass: NDArray[float64],
+    active_state: int,
+    dtq: float,
+    de_corr: float,
+) -> NDArray[complex128]:
+    """Energy-based decoherence correction of Granucci and Persico.
+
+    Plain fewest-switches surface hopping propagates the electronic amplitudes
+    coherently along one classical trajectory, so coherences that ought to be
+    destroyed by the separation of nuclear wavepackets survive indefinitely.
+    The populations then drift away from the fraction of trajectories actually
+    running on each state, and the branching ratios with them.
+
+    Each inactive state is damped towards zero with a time constant set by how
+    far it lies from the active surface and how fast the nuclei are moving::
+
+        tau_k    = (1 + C / E_kin) / |E_k - E_a|          (atomic units)
+        c_k     <- c_k * exp(-dtq / tau_k)                 k != a
+        |c_a|^2 <- 1 - sum_{k != a} |c_k|^2
+
+    The population of an inactive state therefore decays as
+    ``exp(-2 dtq / tau_k)``. Both factors shorten tau: states far apart in
+    energy decohere quickly, and so do fast nuclei, since a large ``E_kin``
+    shrinks the ``C / E_kin`` term towards the bare ``hbar / |E_k - E_a|``. A
+    motionless system has a diverging tau and is left alone.
+
+    Written on amplitudes rather than on the density matrix. The two are
+    equivalent -- with ``rho_ij = c_i conj(c_j)`` the rescaling above reproduces
+    the full density-matrix transformation, including the
+    ``sqrt(rho_aa' / rho_aa)`` factor that the coherences between the active
+    state and the rest pick up.
+
+    Parameters
+    ----------
+    de_corr
+        The ``C`` of the expression above, in Hartree; 0.1 is the value
+        recommended by Granucci and Persico. ``de_corr <= 0`` disables the
+        correction and returns the amplitudes untouched.
+
+    Reference
+    ---------
+    G. Granucci and M. Persico, J. Chem. Phys. 126, 134114 (2007).
+    """
+    if de_corr <= 0.0:
+        return c
+
+    kinetic_energy = 0.5 * float(np.sum(mass * v * v))
+
+    c = c.copy()
+    active_population = float(np.abs(c[active_state]) ** 2)
+    if active_population < MINIMUM_KINETIC_ENERGY:
+        # Nothing left on the active state to rescale against; the trajectory
+        # has bigger problems than its coherences.
+        return c
+
+    for state in range(len(c)):
+        if state == active_state:
+            continue
+
+        gap = abs(float(epot[state] - epot[active_state]))
+        if kinetic_energy < MINIMUM_KINETIC_ENERGY or gap < MINIMUM_DECOHERENCE_GAP:
+            decay_time = LONG_DECAY_TIME
+        else:
+            decay_time = (1.0 + de_corr / kinetic_energy) / gap
+
+        c[state] *= np.exp(-dtq / decay_time)
+
+    # Put whatever the inactive states lost back into the active one, which is
+    # what keeps the trace at one.
+    remaining = 1.0 - float(
+        np.sum(np.abs(np.delete(c, active_state)) ** 2)
+    )
+    remaining = max(remaining, 0.0)
+    c[active_state] *= np.sqrt(remaining / active_population)
+
+    return c

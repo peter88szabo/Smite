@@ -163,3 +163,178 @@ def test_hop_probability_tracks_the_population_it_transfers():
         observed = (population - np.abs(c[0]) ** 2) / population
 
         assert predicted == pytest.approx(observed, rel=1.0e-3)
+
+
+# --------------------------------------------------------------------------
+# Energy-based decoherence correction
+# --------------------------------------------------------------------------
+
+from fssh.fssh import LONG_DECAY_TIME, _decoherence
+
+
+def _amplitudes(populations):
+    c = np.sqrt(np.asarray(populations, dtype=float)).astype(complex)
+    return c / np.sqrt(np.sum(np.abs(c) ** 2))
+
+
+def _decay_time(gap, kinetic_energy, de_corr):
+    """tau_k = (1 + C / E_kin) / |E_k - E_a|, the Granucci-Persico expression."""
+    return (1.0 + de_corr / kinetic_energy) / gap
+
+
+def test_disabled_by_default_leaves_the_amplitudes_untouched():
+    c = _amplitudes([0.7, 0.3])
+    mass = np.full((2, 3), 1000.0)
+    v = np.full((2, 3), 0.01)
+
+    unchanged = _decoherence(c, np.array([0.0, 0.05]), v, mass, 0, 1.0, de_corr=0.0)
+    assert unchanged is c or unchanged == pytest.approx(c)
+
+
+def test_inactive_population_follows_the_analytic_decay():
+    """|c_k|^2 must fall as exp(-2 dtq / tau_k), not exp(-dtq / tau_k)."""
+    de_corr, dtq = 0.1, 2.0
+    epot = np.array([0.0, 0.05])
+    mass = np.full((3, 3), 1000.0)
+    v = np.full((3, 3), 0.01)
+    kinetic_energy = 0.5 * float(np.sum(mass * v * v))
+
+    c = _amplitudes([0.7, 0.3])
+    before = float(np.abs(c[1]) ** 2)
+
+    after = _decoherence(c, epot, v, mass, 0, dtq, de_corr)
+
+    tau = _decay_time(abs(epot[1] - epot[0]), kinetic_energy, de_corr)
+    assert float(np.abs(after[1]) ** 2) == pytest.approx(
+        before * np.exp(-2.0 * dtq / tau), rel=1.0e-12
+    )
+
+
+def test_the_trace_is_restored_to_one():
+    c = _amplitudes([0.5, 0.3, 0.2])
+    mass = np.full((4, 3), 1000.0)
+    v = np.full((4, 3), 0.02)
+
+    after = _decoherence(c, np.array([0.0, 0.04, 0.09]), v, mass, 0, 3.0, 0.1)
+    assert float(np.sum(np.abs(after) ** 2)) == pytest.approx(1.0, abs=1.0e-12)
+
+
+def test_population_lost_by_inactive_states_lands_on_the_active_one():
+    c = _amplitudes([0.5, 0.3, 0.2])
+    mass = np.full((4, 3), 1000.0)
+    v = np.full((4, 3), 0.02)
+    before = np.abs(c) ** 2
+
+    after = np.abs(_decoherence(c, np.array([0.0, 0.04, 0.09]), v, mass, 0, 3.0, 0.1)) ** 2
+
+    assert after[1] < before[1] and after[2] < before[2]
+    assert after[0] > before[0]
+    assert after[0] - before[0] == pytest.approx(
+        (before[1] - after[1]) + (before[2] - after[2]), abs=1.0e-12
+    )
+
+
+@pytest.mark.parametrize("gap, faster", [(0.20, True), (0.01, False)])
+def test_states_further_apart_in_energy_decohere_faster(gap, faster):
+    c = _amplitudes([0.6, 0.4])
+    mass = np.full((3, 3), 1000.0)
+    v = np.full((3, 3), 0.01)
+
+    wide = np.abs(_decoherence(c, np.array([0.0, 0.20]), v, mass, 0, 2.0, 0.1)[1]) ** 2
+    narrow = np.abs(_decoherence(c, np.array([0.0, 0.01]), v, mass, 0, 2.0, 0.1)[1]) ** 2
+    assert wide < narrow
+
+
+def test_faster_nuclei_decohere_more_quickly():
+    """tau = (1 + C/E_kin)/|dE|, so a large E_kin shrinks tau.
+
+    Slow nuclei give a large C/E_kin, a long decay time and almost no
+    decoherence; in the limit of a motionless system tau diverges. Fast nuclei
+    approach the bare hbar/|dE|, the shortest the correction allows.
+    """
+    c = _amplitudes([0.6, 0.4])
+    epot = np.array([0.0, 0.05])
+    mass = np.full((3, 3), 1000.0)
+
+    slow = np.abs(_decoherence(c, epot, np.full((3, 3), 0.005), mass, 0, 2.0, 0.1)[1]) ** 2
+    fast = np.abs(_decoherence(c, epot, np.full((3, 3), 0.05), mass, 0, 2.0, 0.1)[1]) ** 2
+
+    assert fast < slow                       # more population lost when fast
+    assert slow < np.abs(c[1]) ** 2          # but both do decay
+
+
+@pytest.mark.parametrize(
+    "epot, v",
+    [
+        (np.array([0.0, 0.0]), np.full((3, 3), 0.01)),      # degenerate states
+        (np.array([0.0, 0.05]), np.zeros((3, 3))),          # motionless nuclei
+    ],
+)
+def test_a_diverging_decay_time_is_guarded(epot, v):
+    """A vanishing gap or vanishing kinetic energy must not divide by zero."""
+    c = _amplitudes([0.6, 0.4])
+    mass = np.full((3, 3), 1000.0)
+
+    after = _decoherence(c, epot, v, mass, 0, 2.0, 0.1)
+
+    assert np.all(np.isfinite(after))
+    assert float(np.sum(np.abs(after) ** 2)) == pytest.approx(1.0, abs=1.0e-12)
+    # The substituted time is long enough that a normal step changes nothing.
+    assert np.abs(after[1]) ** 2 == pytest.approx(
+        np.abs(c[1]) ** 2 * np.exp(-4.0 / LONG_DECAY_TIME), rel=1.0e-9
+    )
+
+
+def test_repeated_application_drives_the_active_state_to_one():
+    """Over many steps the coherences are destroyed, which is the whole point."""
+    c = _amplitudes([0.5, 0.5])
+    epot = np.array([0.0, 0.05])
+    mass = np.full((3, 3), 1000.0)
+    v = np.full((3, 3), 0.01)
+
+    for _ in range(400):
+        c = _decoherence(c, epot, v, mass, 0, 2.0, 0.1)
+
+    assert float(np.abs(c[0]) ** 2) == pytest.approx(1.0, abs=1.0e-3)
+    assert float(np.sum(np.abs(c) ** 2)) == pytest.approx(1.0, abs=1.0e-12)
+
+
+def test_the_amplitude_form_matches_the_density_matrix_transformation():
+    """The correction is defined on rho; we apply it to c. They must agree.
+
+    Granucci and Persico write the correction as a transformation of the density
+    matrix. This writes that transformation out element by element -- including
+    the sqrt(rho_aa' / rho_aa) factor the coherences between the active state
+    and the rest pick up -- and checks that the amplitude form reproduces it.
+    """
+    de_corr, dtq, active = 0.1, 2.0, 0
+    epot = np.array([0.0, 0.04, 0.09])
+    mass = np.full((4, 3), 1000.0)
+    v = np.full((4, 3), 0.02)
+    kinetic_energy = 0.5 * float(np.sum(mass * v * v))
+
+    c = np.array([0.6, 0.5 + 0.2j, 0.3 - 0.4j], dtype=complex)
+    c /= np.sqrt(np.sum(np.abs(c) ** 2))
+    rho = np.outer(c, c.conj())
+
+    tau = {
+        k: _decay_time(abs(epot[k] - epot[active]), kinetic_energy, de_corr)
+        for k in range(3) if k != active
+    }
+
+    # The density-matrix form of the correction, written out explicitly.
+    expected = rho.copy()
+    for k in tau:
+        expected[k, k] = rho[k, k] * np.exp(-2.0 * dtq / tau[k])
+    expected[active, active] = 1.0 - sum(expected[k, k] for k in tau)
+    for k in tau:
+        for l in tau:
+            if k != l:
+                expected[k, l] = rho[k, l] * np.exp(-dtq / tau[k]) * np.exp(-dtq / tau[l])
+    scale = np.sqrt(expected[active, active] / rho[active, active])
+    for k in tau:
+        expected[k, active] = rho[k, active] * np.exp(-dtq / tau[k]) * scale
+        expected[active, k] = rho[active, k] * np.exp(-dtq / tau[k]) * scale
+
+    corrected = _decoherence(c, epot, v, mass, active, dtq, de_corr)
+    assert np.outer(corrected, corrected.conj()) == pytest.approx(expected, abs=1.0e-12)

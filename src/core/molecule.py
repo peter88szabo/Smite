@@ -446,7 +446,8 @@ class Molecule:
 
     def _save_restart_state(self, backfile, completed_step, initial_energy, thermostat,
                             thermo_param=None, thermo_temp=None, dt=0.0,
-                            integrator="verlet", integrator_order=4, propagator=None):
+                            integrator="verlet", integrator_order=4, propagator=None,
+                            quantum_propagator=None, q_integrator=None):
         py_state = random.getstate()
         np_state = np.random.get_state()
         state = {
@@ -483,6 +484,22 @@ class Molecule:
                 "save_veloc": propagator.save_veloc.tolist(),
                 "save_force": propagator.save_force.tolist(),
             }
+
+        # Without this an interrupted surface-hopping run restarts on whichever
+        # surface the input file names, with the amplitudes reset to a pure
+        # state and the coupling phase forgotten -- silently, and on the wrong
+        # surface.
+        if q_integrator is not None and quantum_propagator is not None:
+            electronic = {
+                "q_integrator": q_integrator,
+                "num_states": int(getattr(self, "num_states", 1)),
+                "active_state": int(getattr(self, "active_state", 0)),
+                "amplitudes_real": np.real(quantum_propagator.c).tolist(),
+                "amplitudes_imag": np.imag(quantum_propagator.c).tolist(),
+            }
+            if quantum_propagator.d is not None:
+                electronic["couplings_real"] = np.real(quantum_propagator.d).tolist()
+            state["electronic"] = electronic
 
         if self.has_rigid_constraints:
             constrained_dof = sum(
@@ -639,6 +656,39 @@ class Molecule:
             self.reaction_channel_persistence = reaction_hysteresis.consecutive_steps
         return float(state["initial_energy"])
 
+    def _restore_quantum_restart_state(self, state, quantum_propagator, q_integrator):
+        """Put the saved electronic state back into a restarted propagator."""
+        if q_integrator is None or quantum_propagator is None:
+            return
+        if state is None:
+            return
+
+        saved = state.get("electronic")
+        if saved is None:
+            raise ValueError(
+                "This checkpoint carries no electronic state, so a surface-hopping "
+                "run cannot be restarted from it. It was written by a trajectory "
+                "without q_integrator, or by a version that did not save it."
+            )
+        if saved.get("q_integrator") != q_integrator:
+            raise ValueError("Restart quantum integrator does not match the checkpoint")
+        if int(saved.get("num_states", -1)) != int(self.num_states):
+            raise ValueError("Restart num_states does not match the checkpoint")
+
+        amplitudes = np.asarray(saved["amplitudes_real"], dtype=float) + \
+            1j * np.asarray(saved["amplitudes_imag"], dtype=float)
+        if amplitudes.shape != quantum_propagator.c.shape:
+            raise ValueError("Restart electronic amplitudes have an incompatible shape")
+
+        self.active_state = int(saved["active_state"])
+        quantum_propagator.c = amplitudes
+        # The coupling is restored only so its sign carries over; it is
+        # recomputed from the geometry on the first step anyway.
+        if "couplings_real" in saved:
+            quantum_propagator.d = np.asarray(
+                saved["couplings_real"], dtype=float
+            ).astype(complex)
+
     @staticmethod
     def _restore_integrator_restart_state(state, propagator, integrator, integrator_order):
         if state is None:
@@ -756,7 +806,10 @@ class Molecule:
                              active_state=0,
                              state_qcinput=None,
                              dtq=None,
-                             de_cutoff=0.5):
+                             de_cutoff=0.5,
+                             de_corr=0.0,
+                             n_substeps=None,
+                             hop_gap_max=None):
 
         if traj_file is None:
             traj_file = 'traj_' + self.fname + '.xyz' 
@@ -857,10 +910,20 @@ class Molecule:
             atoms=self.atoms,
             state_qcinput=state_qcinput,
             de_cutoff=de_cutoff,
+            de_corr=de_corr,
+            n_substeps=n_substeps,
+            hop_gap_max=hop_gap_max,
         )
         self._restore_integrator_restart_state(
             restart_state, propag, integrator, integrator_order
         )
+        # Restores active_state and the amplitudes, so a restarted surface
+        # hopping run carries on from the surface it was actually on.
+        self._restore_quantum_restart_state(restart_state, q_propag, q_integrator)
+
+        if q_propag is not None:
+            self.active_state_history = []
+            self.population_history = []
 
         with open(traj_file, "a") as file_trj:
             # Inspect the terminal state too, without an extra integration.

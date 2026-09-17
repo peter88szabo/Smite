@@ -409,3 +409,140 @@ def test_fssh_trajectory_conserves_amplitude_norm_and_hops(pes_dir, tmp_path):
 
     # Whatever surface it ends on, the classical force follows it.
     assert molecule.qchem["state"] == molecule.active_state
+
+
+# --------------------------------------------------------------------------
+# Sub-step count, hop rejection, restart
+# --------------------------------------------------------------------------
+
+def _propagator(state_qcinput, **kwargs):
+    return initialize_quantum_propagator(
+        "fssh", 2, 0, atoms=ATOMS, state_qcinput=state_qcinput, **kwargs
+    )
+
+
+def test_substep_count_is_preferred_over_a_quantum_timestep(state_qcinput):
+    """A count cannot be given in the wrong time unit; dtq can."""
+    propagator = _propagator(state_qcinput, n_substeps=8)
+
+    seen = []
+    import fssh.fssh as module
+    original = module._quantum_step
+
+    def record(v, c, d, epot, num_states, active_state, hopped_state, dtq, **kw):
+        seen.append(dtq)
+        return original(v, c, d, epot, num_states, active_state, hopped_state, dtq, **kw)
+
+    module._quantum_step = record
+    try:
+        molecule = Molecule(ATOMS, np.ones(3), np.zeros(9), np.ones(9))
+        propagator(80.0, 0, 2, molecule.q, molecule.p, molecule.wmass, dtq=1.0)
+    finally:
+        module._quantum_step = original
+
+    # dtq=1.0 would have given 80 sub-steps; the count overrides it.
+    assert len(seen) == 8
+    assert seen[0] == pytest.approx(10.0)
+
+
+@pytest.mark.parametrize("bad", [0, -3])
+def test_a_nonsensical_substep_count_is_rejected(state_qcinput, bad):
+    with pytest.raises(ValueError, match="at least 1"):
+        _propagator(state_qcinput, n_substeps=bad)
+
+
+def test_a_quantum_timestep_longer_than_the_classical_one_is_rejected(state_qcinput):
+    """The symptom of giving dtq in the wrong unit."""
+    propagator = _propagator(state_qcinput)
+    molecule = Molecule(ATOMS, np.ones(3), np.zeros(9), np.ones(9))
+    with pytest.raises(ValueError, match="same unit"):
+        propagator(10.0, 0, 2, molecule.q, molecule.p, molecule.wmass, dtq=50.0)
+
+
+def test_hops_across_a_large_gap_are_rejected(state_qcinput):
+    """A hop selected across a huge gap is a coupling artefact, not physics."""
+    import fssh.fssh as module
+
+    propagator = _propagator(state_qcinput, hop_gap_max=0.01)
+    molecule = Molecule(ATOMS, np.ones(3), np.zeros(9), np.ones(9))
+
+    # Force a hop to state 1, and place state 1 far above the active state.
+    module_check = module._check_hop
+    module._check_hop = lambda *a, **k: 1
+    energies = np.array([0.0, 5.0])
+    module_energy = module.PES_Energy
+    module.PES_Energy = lambda q, states=None: energies
+    try:
+        _, active = propagator(10.0, 0, 2, molecule.q, molecule.p, molecule.wmass,
+                               dtq=1.0)
+    finally:
+        module._check_hop = module_check
+        module.PES_Energy = module_energy
+
+    assert active == 0                       # the hop was discarded
+
+
+@pytest.mark.parametrize("bad", [0.0, -1.0])
+def test_a_nonsensical_hop_gap_limit_is_rejected(state_qcinput, bad):
+    with pytest.raises(ValueError, match="must be positive"):
+        _propagator(state_qcinput, hop_gap_max=bad)
+
+
+def test_restart_round_trips_the_electronic_state(state_qcinput, tmp_path):
+    """Without this a restarted run silently resumes on the wrong surface."""
+    molecule = Molecule(ATOMS, np.ones(3), np.zeros(9), np.ones(9))
+    molecule.fname = "restart_test"
+    molecule.qchem = dict(state_qcinput[0])
+    molecule.num_states, molecule.active_state = 2, 1
+
+    propagator = _propagator(state_qcinput)
+    propagator.c = np.array([0.6 + 0.1j, 0.5 - 0.3j], dtype=complex)
+    propagator.d = np.zeros((2, 2, 3, 3), dtype=complex)
+    propagator.d[0, 1, 0, 0] = 0.7
+    propagator.d[1, 0, 0, 0] = -0.7
+
+    backfile = str(tmp_path / "backup.xyz")
+    molecule._set_trajectory_scratch_dir = lambda *a, **k: None
+    molecule._save_restart_state(
+        backfile, 5, 0.0, None, dt=1.0, integrator="verlet", integrator_order=4,
+        propagator=None, quantum_propagator=propagator, q_integrator="fssh",
+    )
+
+    state = molecule._load_restart_state(backfile, 5)
+
+    resumed = Molecule(ATOMS, np.ones(3), np.zeros(9), np.ones(9))
+    resumed.num_states, resumed.active_state = 2, 0        # deliberately wrong
+    fresh = _propagator(state_qcinput)
+    resumed._restore_quantum_restart_state(state, fresh, "fssh")
+
+    assert resumed.active_state == 1                        # not the reset 0
+    assert fresh.c == pytest.approx(propagator.c)
+    assert fresh.d.real == pytest.approx(propagator.d.real)
+
+
+def test_restarting_from_a_checkpoint_without_electronic_state_is_refused(
+    state_qcinput, tmp_path
+):
+    molecule = Molecule(ATOMS, np.ones(3), np.zeros(9), np.ones(9))
+    molecule.fname = "plain"
+    backfile = str(tmp_path / "plain.xyz")
+    molecule._save_restart_state(backfile, 3, 0.0, None, dt=1.0)
+
+    state = molecule._load_restart_state(backfile, 3)
+    molecule.num_states = 2
+
+    with pytest.raises(ValueError, match="no electronic state"):
+        molecule._restore_quantum_restart_state(state, _propagator(state_qcinput), "fssh")
+
+
+def test_the_quantum_step_runs_after_the_thermostat(pes_dir, tmp_path):
+    """A hop rescales the momenta; a thermostat applied afterwards would undo it."""
+    import core.molecule as molecule_module
+    import inspect
+
+    source = inspect.getsource(molecule_module.Molecule.run_trajectory)
+    integrator_at = source.index("apply_integrator(self, integrator, dt, propag)")
+    thermostat_at = source.index("apply_thermostat(self, thermostat")
+    quantum_at = source.index("apply_quantum_integrator(self, q_integrator")
+
+    assert integrator_at < thermostat_at < quantum_at
