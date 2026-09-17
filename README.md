@@ -386,6 +386,166 @@ rigid-rotor harmonic-oscillator vibrational entropies or Grimme's quasi-RRHO
 treatment controlled by a frequency cutoff, with configurable symmetry and
 chirality numbers.
 
+## X-ray scattering form factors
+
+Time-resolved rotationally averaged scattering from a saved trajectory, in the
+independent atom model of Eq. 25 of Moreno-Carrascosa et al.,
+*J. Chem. Theory Comput.* **2019**, 15, 2836:
+
+```python
+molecule.run_trajectory(..., spectrum=True)          # required: saves the geometries
+molecule.get_scattering_form_factors(dt, qmin=0.0, qmax=8.0, nq=600, dpi=600)
+```
+
+This writes `<fname>_time_dependent_scattering_form_factors.dat` with columns
+`time_fs q_A^-1 elastic inelastic total`, and a three-panel time-versus-q map as
+a PNG. `spectrum=True` only saves geometries for an NVE run; with a thermostat
+no history is kept and the call raises.
+
+### Fourier transforms
+
+With `fourier=True`, the default, two further transforms are written, each as a
+`.dat` and a `.png`:
+
+| Output | Transform | Shows |
+| --- | --- | --- |
+| `<fname>_scattering_power_spectrum.*` | along **time** | `P(omega, q)`: which vibrational frequencies modulate the scattering at each q. Columns `frequency_cm^-1 q_A^-1 elastic inelastic total`. |
+| `<fname>_scattering_pair_distribution.*` | sine transform along **q** | `dPDF(r, t)`: interatomic distances and how they evolve. Columns `time_fs r_A elastic inelastic total`. |
+
+Both transforms are applied to the elastic, inelastic and total channels and
+laid out like the direct output: three columns in one `.dat`, three stacked
+panels in one `.png`.
+
+Expect the signal to sit in the elastic panel. In the independent atom model the
+inelastic term is `sum_i S_i(q)`, a function of the atom list and of q with no
+geometry dependence. It is large in the raw intensity -- on formaldehyde, 72% of
+the total at `q = 8` A^-1 and 81% at `q = 12` A^-1 -- but constant in time.
+Since both transforms subtract the static part, the inelastic panel comes out at
+rounding-error level and the total panel reproduces the elastic one. All three
+are written so that this is visible in the data rather than taken on trust.
+
+Both transform the **difference** signal, not the raw intensity: the static
+scattering is orders of magnitude larger than its modulation and would otherwise
+bury the dynamics. `temporal_reference="mean"` removes the time average, which
+is what a power spectrum wants; `pdf_reference="first"` subtracts the first
+frame, the experimental `dI = I(t) - I(t<0)` convention. Both default to the
+**elastic** term, since the inelastic part is a smooth single-atom background
+with no interatomic interference.
+
+The frequency axis uses the same `frequency_axis_cm1` as
+`molecule.vibrational_spectrum`, so the two are directly comparable. The pair
+distribution integrates the modified intensity `q dI(q) / sum_i f_i(q)^2` with a
+Gaussian damping that defaults to `ln(10)/qmax^2`, suppressing the ripple from
+truncating the integral at `qmax`. Real-space resolution is about `pi/qmax`, so
+`qmax=12` A^-1 resolves features roughly 0.26 A apart.
+
+### Short-time spectrum
+
+A single power spectrum assumes the dynamics are stationary over the whole
+trajectory. That holds for a vibrating molecule and fails for a reactive one,
+where modes appear, shift and vanish. The short-time transform slides a window
+along the trajectory instead, giving `P(t, omega)`:
+
+```
+<fname>_scattering_short_time_spectrum.dat   # time_fs  frequency_cm^-1  elastic inelastic total
+<fname>_scattering_short_time_spectrum.png   # 3 panels, time versus frequency
+```
+
+Produced by default (`short_time=True`), controlled with
+`short_time_window_fs`, `short_time_hop_fs` and `short_time_q_range`. The window
+sets the frequency resolution, roughly `33000 / window_fs` in cm^-1, against the
+time resolution it costs. Unset, it takes a quarter of the trajectory capped at
+200 fs, with a hop of a quarter window. A trajectory too short to hold a window
+simply skips this output rather than failing.
+
+The spectrogram is integrated over q, since resolving time, frequency and q at
+once no longer fits the two-axis file layout. `short_time_q_range=(qmin, qmax)`
+restricts that integration, which is how a particular distance range is
+isolated.
+
+### Re-analysing a finished run
+
+A saved run can be re-transformed with different window settings without
+repeating the trajectory:
+
+```python
+from analysis.scattering import reanalyze_scattering_short_time
+
+reanalyze_scattering_short_time(
+    "ch2o_time_dependent_scattering_form_factors.dat",
+    window_fs=150.0, hop_fs=25.0, q_range=(2.0, 8.0), label="_2to8",
+)
+```
+
+This reads the `.dat` back, applies the transform and writes a new `.dat` and
+`.png`. `label` keeps several analyses of the same run side by side.
+
+The underlying pieces are in `analysis.scattering_fourier` and are not specific
+to scattering: `short_time_power_spectrum(time_fs, signal, window_fs=..., hop_fs=...)`
+takes any evenly sampled `(n_frames, n_channels)` array, and
+`read_time_dependent_scattering(path)` returns the saved file as arrays.
+
+Relevant options: `temporal_reference`, `temporal_window`, `pdf_reference`,
+`rmin`, `rmax`, `nr`, `pdf_damping`, `short_time`, `short_time_window_fs`,
+`short_time_hop_fs`, `short_time_q_range`. Set `fourier=False` to write only the
+time-dependent output. The transforms are also usable directly from
+`analysis.scattering_fourier` (`temporal_power_spectrum`,
+`pair_distribution_function`, `short_time_power_spectrum`,
+`modified_scattering`).
+
+Atomic data is read offline from the ESRF DABAX tables shipped in
+`src/analysis/data/`: elastic Cromer-Mann coefficients from `f0_InterTables.dat`
+and Hubbell inelastic scattering functions from `isf_Hubbell.dat`. Two modules
+expose it:
+
+| Module | Coverage |
+| --- | --- |
+| `analysis.xray_scattering_tables` | all 98 elements present in both source tables; used by `get_scattering_form_factors` |
+| `analysis.xray_scattering_tables_hcno` | H, C, N, O only, coefficients hardcoded in the file |
+
+The two agree exactly where they overlap. The lower-level entry points are
+`independent_atom_model_scattering(elements, coordinates_angstrom, q)` and the
+`XrayScattering` class (`f0`, `isf`, `iam`, `elements`, `ions`).
+
+### Charged fragments
+
+113 ionic species are tabulated and may be used wherever an element symbol is
+accepted:
+
+```python
+iam = independent_atom_model_scattering(["O2-", "H", "H"], coordinates, q)
+```
+
+Spelling is flexible -- `O1-`, `O2-`, `O-2`, `Fe2+`, `Fe+2` and their lowercase
+forms all resolve to the same entry, which matters because the source file
+itself is inconsistent (it spells two entries `Fe+2` and `Ru+4`). List what is
+available with `supported_ions()`.
+
+**The inelastic term for an ion is approximate.** `isf_Hubbell.dat` tabulates
+neutral atoms only, so an ion's incoherent scattering function falls back to its
+neutral parent: the elastic term is exact for the ion, the inelastic term is
+not. The library warns once per ionic species, and
+`isf_is_approximated(species)` reports it programmatically.
+
+### Data caveats
+
+`f0(q=0)` equals the electron count, which makes the tables self-checking.
+`electron_count_error(species)` returns the residual; it is below 0.06 electrons
+for every species except four, where the published actinide block has two
+swapped pairs:
+
+| Entry | Coefficients sum to | Should be |
+| --- | --- | --- |
+| `Np3+` | 87.0 | 90 |
+| `Np6+` | 90.0 | 87 |
+| `Np4+` | 94.0 | 89 |
+| `Pu` | 89.0 | 94 |
+
+`Np3+`/`Np6+` and `Np4+`/neutral `Pu` carry each other's coefficients. Using any
+of the four raises a `RuntimeWarning`; their results should not be trusted. The
+check is derived from the data rather than a fixed list, so any similar defect
+would be caught too.
+
 ## Parallel Trajectory Runs
 
 Use `base_seed` to reproduce an ensemble independently of worker scheduling.
@@ -431,6 +591,7 @@ Progress display is controlled with `progress_mode`. Use `progress_mode="table"`
 - `src/optimizer/`: minima, transition states, IRC, spin crossings, and coordinate scans.
 - `src/normalmode/`: Hessians, Eckart projection, frequencies, and thermochemistry.
 - `src/analysis/`: spectra, energy partitioning, conservation checks, and scattering form factors.
+- `src/analysis/data/`: offline ESRF DABAX atomic scattering tables.
 - `src/parallel/`: independent parallel trajectory scheduling helpers.
 - `src/thermostats/`: NVT thermostat implementations.
 - `src/qchem_interfaces/`: external quantum chemistry and PES force interfaces.

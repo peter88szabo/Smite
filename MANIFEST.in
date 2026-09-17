@@ -3,6 +3,7 @@ include README.md
 include pyproject.toml
 include src/test*.py
 recursive-include peslib *.py *.f *.f90 *.pyf *.dat *.txt Makefile *.sh
+recursive-include src/analysis/data *.dat
 
 recursive-exclude papers *
 recursive-exclude build *

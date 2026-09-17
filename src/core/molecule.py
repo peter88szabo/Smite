@@ -361,8 +361,8 @@ class Molecule:
         """Alias for short_time_vibrational_spectrum."""
         return self.short_time_vibrational_spectrum(dt=dt, **kwargs)
 
-    def get_scattering_form_factors(self, dt, qmin=0.0, qmax=8.0, nq=600, dpi=600):
-        return compute_scattering_form_factors(self, dt, qmin=qmin, qmax=qmax, nq=nq, dpi=dpi)
+    def get_scattering_form_factors(self, dt, qmin=0.0, qmax=8.0, nq=600, dpi=600, **kwargs):
+        return compute_scattering_form_factors(self, dt, qmin=qmin, qmax=qmax, nq=nq, dpi=dpi, **kwargs)
 
     def optimize_geometry(self, update=True, **kwargs):
         from optimizer import optimize_geometry
