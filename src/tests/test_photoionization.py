@@ -86,7 +86,7 @@ def test_binding_energy_is_not_ionic_kinetic_energy_and_offset_aligns_pes():
     ({"ionic_energy": 16.}, "negative"),
     ({"ionic_energy": None}, "requires"),
     ({"level": 0}, "Level 0"),
-    ({"level": 2}, "levels 0 and 1"),
+    ({"level": 4}, "levels 0, 1, 2 and 3"),
     ({"photon_energy": 0.}, "positive"),
     ({"photon_energy": np.nan}, "finite"),
     ({"ionic_energy": True}, "finite number"),

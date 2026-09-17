@@ -165,3 +165,14 @@ cython_debug/
 
 # Trajectory / normal-mode / xtb run output -- regenerated, never committed
 examples/test/
+
+# Photoionization module manual -- kept private for now
+report/photoionization_module.tex
+report/photoionization_module.pdf
+
+# LaTeX build artifacts
+*.aux
+*.fls
+*.fdb_latexmk
+*.toc
+*.synctex.gz

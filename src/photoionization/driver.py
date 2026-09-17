@@ -58,7 +58,8 @@ def tpepico(molecule, ion_qchem, *, photon_energy, neutral_hessian=None,
             neutral_geometry=None, neutral_md_file=None, qct_options=None,
             level=0, n_samples=1, electron_energy=None, ionic_energy=None,
             md_start=0, md_stride=1, ion_energy_offset=0.0, seed=None,
-            energy_tolerance=1e-8, output_dir=None, dynamics=None):
+            energy_tolerance=1e-8, output_dir=None, dynamics=None,
+            recoil_site="com", photon_direction=(0.0, 0.0, 1.0)):
     """Prepare ions from a supplied neutral Hessian/geometry OR saved neutral MD.
 
     Exactly one of ``neutral_hessian`` and ``neutral_md_file`` is required.
@@ -84,16 +85,27 @@ def tpepico(molecule, ion_qchem, *, photon_energy, neutral_hessian=None,
     from core.molecule import Molecule
 
     n_samples = positive_integer(n_samples, "n_samples")
-    if isinstance(level, (bool, np.bool_)) or level not in (0, 1):
-        raise ValueError("Only photoionization levels 0 and 1 are implemented")
+    if isinstance(level, (bool, np.bool_)) or level not in (0, 1, 2, 3):
+        raise ValueError("Only photoionization levels 0, 1, 2 and 3 are implemented")
     photon = finite_scalar(photon_energy, "photon_energy", nonnegative=True)
     tolerance = finite_scalar(energy_tolerance, "energy_tolerance", nonnegative=True)
     if photon == 0 or tolerance == 0:
         raise ValueError("photon_energy and energy_tolerance must be positive")
     offset = finite_scalar(ion_energy_offset, "ion_energy_offset")
     if level == 0 and (electron_energy is not None or ionic_energy is not None):
-        raise ValueError("Use Level 1 to impose experimental electron/ionic energy constraints")
-    constraints = EnergyConstraints(photon, electron_energy, ionic_energy, tolerance) if level == 1 else None
+        raise ValueError("Use Level 1, 2 or 3 to impose experimental electron/ionic energy constraints")
+    # Levels 1-3 all close the same energy balance from measured energies; they
+    # differ only in which part of the momentum absorbs it. Level 0 infers the
+    # binding energy from the vertical gap instead, so it takes no constraints.
+    constraints = (EnergyConstraints(photon, electron_energy, ionic_energy, tolerance)
+                   if level in (1, 2, 3) else None)
+    # Recoil is a Level 3 concept. Accepting these silently at lower levels would
+    # let a caller believe recoil was modelled when it was discarded.
+    if level != 3:
+        if recoil_site != "com":
+            raise ValueError("recoil_site applies to Level 3 only; lower levels model no recoil")
+        if tuple(np.asarray(photon_direction, dtype=float).reshape(-1)) != (0.0, 0.0, 1.0):
+            raise ValueError("photon_direction applies to Level 3 only; lower levels model no recoil")
     if (neutral_hessian is None) == (neutral_md_file is None):
         raise ValueError("Provide exactly one of neutral_hessian or neutral_md_file")
     if neutral_md_file is not None and (neutral_geometry is not None or qct_options is not None):
@@ -142,7 +154,8 @@ def tpepico(molecule, ion_qchem, *, photon_energy, neutral_hessian=None,
                 state = prepare_ionic_state(
                     q, p, molecule.mass, vn, vi, photon_energy=photon, level=level,
                     constraints=constraints, ion_energy_offset=offset,
-                    energy_tolerance=tolerance, rng=rng, source_index=source_index)
+                    energy_tolerance=tolerance, rng=rng, source_index=source_index,
+                    recoil_site=recoil_site, photon_direction=photon_direction)
             except ValueError as exc:
                 raise ValueError(f"Launch {index}, {source_name} sample {source_index}: {exc}") from exc
             states.append(state)
@@ -176,7 +189,10 @@ def tpepico(molecule, ion_qchem, *, photon_energy, neutral_hessian=None,
             "atoms": list(molecule.atoms), "mass_au": np.asarray(molecule.mass).tolist(),
             "ionic_energy_definition": "binding energy = photon energy - electron kinetic energy",
             "units": {"q": "bohr", "p": "atomic units", "angular_momentum": "hbar"},
-            "recoil_included": False, "initial_states": [state.to_dict() for state in states],
+            "recoil_included": level == 3,
+            "recoil_site": _json_input(recoil_site) if level == 3 else None,
+            "photon_direction": _json_input(photon_direction) if level == 3 else None,
+            "initial_states": [state.to_dict() for state in states],
         }
         with (destination / "initial_states.json").open("x", encoding="utf-8") as handle:
             json.dump(metadata, handle, indent=2, allow_nan=False)

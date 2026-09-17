@@ -30,7 +30,7 @@ class Photoionization(Molecule):
         neutral_hessian=None, neutral_traj=None, photon_energy=None,
         qct_options=None, level=0, electron_energy=None, ionic_energy=None,
         md_start=0, md_stride=1, ion_energy_offset=0.0, energy_tolerance=1e-8,
-        sampling_seed=None,
+        sampling_seed=None, recoil_site="com", photon_direction=(0.0, 0.0, 1.0),
     ):
         if not isinstance(neutral, Molecule):
             raise TypeError("neutral must be a Molecule or Fragment")
@@ -79,13 +79,15 @@ class Photoionization(Molecule):
             qct_options=None if from_md else qct_options,
             level=level, electron_energy=electron_energy, ionic_energy=ionic_energy,
             md_start=md_start, md_stride=md_stride, ion_energy_offset=ion_energy_offset,
-            energy_tolerance=energy_tolerance, sampling_seed=sampling_seed)
+            energy_tolerance=energy_tolerance, sampling_seed=sampling_seed,
+            recoil_site=recoil_site, photon_direction=photon_direction)
 
     def Specify_Photoionization_Sampling(
         self, *, photon_energy, neutral_hessian=None, neutral_geometry=None,
         neutral_md_file=None, qct_options=None, level=0, electron_energy=None,
         ionic_energy=None, md_start=0, md_stride=1, ion_energy_offset=0.0,
-        energy_tolerance=1e-8, sampling_seed=None,
+        energy_tolerance=1e-8, sampling_seed=None, recoil_site="com",
+        photon_direction=(0.0, 0.0, 1.0),
     ):
         """Configure neutral input and Level 0/1 experimental energy sampling.
 
@@ -95,8 +97,8 @@ class Photoionization(Molecule):
         sampling_seed initializes a stream: successive runs draw new states.
         No neutral dynamics, Hessian calculation or energy evaluation runs here.
         """
-        if isinstance(level, (bool, np.bool_)) or level not in (0, 1):
-            raise ValueError("Only photoionization levels 0 and 1 are implemented")
+        if isinstance(level, (bool, np.bool_)) or level not in (0, 1, 2, 3):
+            raise ValueError("Only photoionization levels 0, 1, 2 and 3 are implemented")
         photon = finite_scalar(photon_energy, "photon_energy", nonnegative=True)
         tolerance = finite_scalar(energy_tolerance, "energy_tolerance", nonnegative=True)
         if photon == 0 or tolerance == 0:
@@ -109,15 +111,16 @@ class Photoionization(Molecule):
         if neutral_hessian is not None and (md_start != 0 or md_stride != 1):
             raise ValueError("md_start and md_stride apply only to neutral_md_file")
         if level == 0 and (electron_energy is not None or ionic_energy is not None):
-            raise ValueError("Use Level 1 to impose experimental electron/ionic energy constraints")
-        if level == 1:
+            raise ValueError("Use Level 1, 2 or 3 to impose experimental electron/ionic energy constraints")
+        if level in (1, 2, 3):
             EnergyConstraints(photon, electron_energy, ionic_energy, tolerance)
         options = deepcopy(dict(
             photon_energy=photon, neutral_hessian=neutral_hessian,
             neutral_geometry=neutral_geometry, neutral_md_file=neutral_md_file,
             qct_options=qct_options, level=level, electron_energy=electron_energy,
             ionic_energy=ionic_energy, md_start=md_start, md_stride=md_stride,
-            ion_energy_offset=offset, energy_tolerance=tolerance))
+            ion_energy_offset=offset, energy_tolerance=tolerance,
+            recoil_site=recoil_site, photon_direction=photon_direction))
         rng = sampling_generator(sampling_seed)
         self._photoionization_sampling = options
         self._photoionization_rng = rng

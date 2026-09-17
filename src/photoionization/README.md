@@ -1,4 +1,4 @@
-# Photoionization: Levels 0 and 1
+# Photoionization: Levels 0 to 3
 
 Pass the ionic interface, neutral structure, Hessian or MD trajectory, and
 experimental energies to `Photoionization(...)`. For a neutral Hessian, configure
@@ -142,6 +142,14 @@ Supply **one** neutral source:
   containing saved coordinates **and momenta**. Frames are sampled uniformly
   with replacement. Their coordinates and momenta are used as stored.
 
+Level-selecting arguments:
+
+* `level`: `0` copies the momenta, `1` scales all 3N components, `2` scales only
+  the internal part (conserving **P** and **L**), `3` adds photon/photoelectron
+  recoil on top of `2`.
+* `recoil_site`: `"com"` (default), an atom index, or per-atom weights. Level 3 only.
+* `photon_direction`: beam direction, default `(0,0,1)`. Level 3 only.
+
 The module does not run neutral MD, optimize a structure or calculate a Hessian.
 It evaluates the neutral and ionic potential energies at each sampled geometry
 through the corresponding existing quantum-chemistry/PES interfaces.
@@ -284,27 +292,182 @@ nonnegative factor**. There is no decomposition into vibrational momenta for
 this correction. Directions are retained (or all momenta become zero if the
 target kinetic energy is zero).
 
-Both levels use a Franck–Condon geometry at the instant of ionization. The
+**Level 2** does what Level 1 does, but rescales only the **internal
+(vibrational)** part of the momentum. The momentum is split with the Eckart
+projector in mass-weighted coordinates, where the kinetic energy is a plain
+Euclidean norm and the split is therefore exactly orthogonal:
+`T = T_ext + T_int` with no cross term, and the internal part carries **zero**
+linear and angular momentum. Rescaling it alone hits the same energy target as
+Level 1 while leaving **P** and **L** bit-for-bit unchanged. Level 2 is strictly
+preferable to Level 1 whenever the neutral sample carries translation or
+rotation, which QCT sampling with `init_rot_type` or `random_rot` always does.
+
+**Level 3** adds the momentum the photon brought in and the photoelectron
+carried away,
+
+```
+dp = p_gamma - p_e ,   p_e = sqrt(2*eps) * n ,   p_gamma = (h*nu/c) * k
+```
+
+shared over the atoms as `p_i -> p_i + w_i*dp` with `sum_i w_i = 1`. Total linear
+momentum then changes by exactly `dp`. Angular momentum changes by
+`(sum_i w_i x_i) x dp`, i.e. by the offset of the **recoil centroid** from the
+centre of mass:
+
+| `recoil_site` | weights | change in **L** | physical limit |
+|---|---|---|---|
+| `"com"` (default) | `m_i/M` | none, exactly | zero internal excitation |
+| an atom index `j` | `delta_ij` | `x_j x dp` | localised core hole |
+| a weight array | as supplied | `(sum_i w_i x_i) x dp` | e.g. Dyson-orbital populations |
+
+Mass-weighted recoil is pure translation and excites nothing internally; a
+localised hole torques the molecule and excites vibration. Note that `"com"` is
+the *zero internal excitation* choice, not literally the delocalised-valence
+limit: translational recoil is `|dp|^2/2M` for **any** weights, and `m_i/M` is
+simply the weighting that minimises `sum_i w_i^2/m_i`. A real delocalised hole
+has populations set by electron density, not mass. The physically correct weights
+are the Dyson-orbital atomic populations, which you supply as an array; see
+`report/2026-09-18_photoionization_levels_2_3_design.md` section 8 for the open
+question of deterministic versus stochastic site selection, which is worth a
+factor of fifteen in internal excitation and is planned work. That asymmetry is the
+recoil effect, and it survives the Level 2 rescale because the rescale is applied
+only to the *neutral* internal component, never to the recoil's.
+
+`photon_direction` (default `(0,0,1)`) sets the beam direction. The photoelectron
+direction is sampled **isotropically**. Both arguments are rejected below Level 3,
+so a caller can never believe recoil was modelled when it was discarded.
+
+Recoil size, for orientation: `E_rec = |p_e|^2/2M = (m_e/M)*eps`, which for water
+is 0.3 meV at 21 eV, 2.4 meV at 100 eV, 21 meV at 1 keV and 82 meV at 3 keV.
+**Below roughly 100 eV Level 3 buys nothing over Level 2** — the recoil is far
+under a vibrational quantum. At keV energies it is the size of a soft mode and is
+a measured photoelectron peak shift.
+
+All four levels use a Franck–Condon geometry at the instant of ionization. The
 unchanged geometry is the sampled neutral phase point, which need not be the
 equilibrium geometry used to build QCT modes.
 
-Level 1 enforces total energy balance within `energy_tolerance` (default
-`1e-8` eV). Negative kinetic energy and attempts to create nonzero momenta by
-rescaling an all-zero momentum vector are rejected. The energy includes the
-**full Cartesian kinetic energy**, including any translation in the source.
-It is not automatically an energy in the molecular COM frame.
+Levels 1, 2 and 3 all enforce total energy balance within `energy_tolerance`
+(default `1e-8` eV), and all three require an experimental electron or ionic
+energy constraint; Level 0 takes none. Negative kinetic energy and attempts to
+create nonzero momenta by rescaling an all-zero momentum vector are rejected. The
+energy includes the **full Cartesian kinetic energy**, including any translation
+in the source. It is not automatically an energy in the molecular COM frame.
 
-Neither level includes photon/electron recoil, recoil directions, photon spin,
-electron partial waves, or their linear/angular momentum balance. Level 0
-preserves nuclear momenta; Level 1 generally changes both total nuclear linear
-momentum and angular momentum. These quantities are recorded before and after,
-not claimed to be conserved by the ionization model.
+Levels 2 and 3 add three rejections, all physical rather than numerical:
+
+* A **monatomic** ion has no internal subspace, so there is nothing to rescale.
+* The external motion alone exceeding the ionic energy budget.
+* The recoil alone depositing more internal energy than the budget allows
+  (a negative discriminant in the rescaling quadratic). No choice of scale factor
+  can satisfy the balance, so the launch is refused rather than approximated.
+
+`momentum_scale` in the launch record is the factor applied to whichever
+component the level rescales: `1.0` at Level 0, the global 3N factor at Level 1,
+and the neutral-internal factor at Levels 2 and 3. The companion field
+`scaled_subspace` (`"none"`, `"all"`, `"internal"`) says which, so the record is
+self-describing. At Levels 2 and 3 this factor may come out **negative** when the
+recoil overshoots the internal budget, meaning the neutral vibrational motion has
+to oppose the recoil. That is permitted, not an error: the sign of an internal
+momentum has no absolute meaning in a Franck–Condon ensemble, where `+a` and
+`-a` are equally represented.
+
+No level models photon spin, electron partial waves, post-collision interaction,
+or shake-up/shake-off channels. Levels 0, 1 and 2 model no recoil at all. The
+photoelectron angular distribution is not modelled at Level 3 either: emission is
+isotropic, and the dipole form `1 + beta*P2(cos theta)` is left for later (the
+`beta`/`polarization` arguments exist but are refused). Isotropic sampling is
+correct for an angle-integrated measurement and averages out over an
+orientationally random ensemble.
+
+Momentum behaviour by level: Level 0 preserves nuclear momenta; **Level 1
+generally changes both total linear and angular momentum, which is a defect of
+that level**; Level 2 conserves both exactly; Level 3 changes them by exactly the
+amount the recoil requires. All are recorded before and after in the launch
+record, and `recoil_included` in `initial_states.json` states whether recoil was
+applied.
+
+A **self-consistent photoelectron energy** — solving
+`eps = h*nu - dV - dT(eps)` so as to *predict* the recoil peak shift instead of
+consuming a measured one — is deliberately not implemented. Levels 1 to 3 take
+the measured energy as input, which is self-consistent with coincidence data
+because a measured photoelectron peak is already recoil-shifted. See the design
+note in `report/2026-09-18_photoionization_levels_2_3_design.md`.
 
 The two PESs must have a consistent energy reference. If fitted surfaces use
 separate zeros, supply `ion_energy_offset` (eV), an additive shift to the ionic
 potential used in the preparation balance. Calibrate it from a known gap at a
 reference geometry. The offset does not change ionic forces; reported backend
 potential energies remain raw, and the offset is recorded separately.
+
+## Choosing a level
+
+The code never picks a level for you and never inspects the photon energy to
+decide one. This section is guidance only.
+
+**The one formula.** The recoil energy handed to the nuclei is
+
+```
+E_rec  =  |p_e|^2 / (2 M_eff)  =  (m_e / M_eff) * eps
+```
+
+where `eps` is the photoelectron kinetic energy and `M_eff` is **the mass that
+actually takes the recoil**: the whole molecule for a delocalised outer-valence
+hole, but a *single atom* for a localised core hole. That second case is the one
+that matters, and it is why photon energy alone is the wrong criterion.
+
+Recoil energy in meV, COM limit / hole localised on the lightest atom:
+
+| molecule | M [u] | 21 eV | 100 eV | 500 eV | 1 keV | 3 keV |
+|---|---|---|---|---|---|---|
+| H2    |   2.0 | 5.7 / 11.4 | 27.2 / 54.4 | 136 / 272 | 272 / 544 | 816 / 1633 |
+| H2O   |  18.0 | 0.6 / 11.4 |  3.0 / 54.4 |  15 / 272 |  30 / 544 |  91 / 1633 |
+| CH4   |  16.0 | 0.7 / 11.4 |  3.4 / 54.4 |  17 / 272 |  34 / 544 | 103 / 1633 |
+| CO    |  28.0 | 0.4 /  1.0 |  2.0 /  4.6 |  10 /  23 |  20 /  46 |  59 /  137 |
+| C6H6  |  78.1 | 0.2 / 11.4 |  0.7 / 54.4 |   4 / 272 |   7 / 544 |  21 / 1633 |
+| CF3I  | 195.9 | 0.1 /  0.6 |  0.3 /  2.9 |   1 /  14 |   3 /  29 |   8 /   87 |
+
+Note the columns: on the lightest atom the number depends only on that atom's
+mass, not on the molecule. A hole on a hydrogen gives the same 54 meV at 100 eV
+in H2 as in benzene.
+
+**Compare `E_rec` against whatever you actually care about** — your analyser
+resolution if you are matching a measured peak, or the vibrational energy scale
+if you care about the trajectory. Taking a 50 meV resolution as an example, the
+photoelectron energy at which recoil becomes visible is:
+
+| | delocalised (COM) | localised on the lightest atom |
+|---|---|---|
+| H2   |   184 eV |    92 eV |
+| H2O  |  1.6 keV |    92 eV |
+| CH4  |  1.5 keV |    92 eV |
+| CO   |  2.6 keV |   1.1 keV |
+| C6H6 |  7.1 keV |    92 eV |
+| CF3I |   18 keV |   1.7 keV |
+
+**Suggested choice.**
+
+* **Level 0** — you have no measured electron or ion energy to impose and want a
+  pure Franck–Condon transfer. Takes no energy constraints.
+* **Level 1** — only to reproduce results generated before Level 2 existed. It is
+  superseded: for the same inputs Level 2 gives the same energy with correct
+  momentum. There is no case where Level 1 is the better physics.
+* **Level 2** — **the default** whenever you impose a measured energy. Threshold
+  and VUV work (TPEPICO, He I/II, `hv` up to ~100 eV) with a delocalised valence
+  hole sits here: recoil is a few meV at most and Level 3 would change nothing
+  you can measure.
+* **Level 3** — when `(m_e/M_eff)*eps` reaches the energy you can resolve. In
+  practice: any core-level ionization above ~100 eV where the hole sits on a
+  light atom, and anything above ~1 keV regardless. Set `recoil_site` to the
+  ionized atom for a core hole; leave it `"com"` for a delocalised valence hole,
+  where it reduces to pure translation and excites nothing internally.
+
+**Two things that shift the answer.** A hole on hydrogen or a first-row atom puts
+`M_eff` one to two orders of magnitude below the molecular mass, so Level 3 earns
+its place far below 1 keV. Conversely a heavy atom carrying the hole (iodine
+here) pushes the crossover into the many-keV range. The photon momentum term
+`p_gamma = hv/c` is under 1% of `p_e` below ~100 eV and reaches 4-6% at a few
+keV; it is always included at Level 3 and never matters below soft X-ray.
 
 ## Neutral QCT options
 
