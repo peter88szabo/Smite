@@ -54,7 +54,11 @@ class FSSH:
         c : NDArray[complex128]
             Quantum amplitudes.
         de_cutoff : float, optional
-            Energy difference cutoff for the non-adiabatic coupling calculation.
+            Per-pair energy-gap cutoff for the non-adiabatic couplings. Pairs
+            separated by more than this are given no coupling. The default of
+            0.5 hartree (13.6 eV) is permissive enough that it rarely excludes
+            anything; narrow it to suppress couplings between states that are
+            not genuinely interacting.
         dtq : float, optional
             Quantum timestep. If not specified, it is set to 1/10 of the classical timestep.
 
@@ -147,7 +151,9 @@ def _get_couplings(
     num_states : int
         Number of states.
     de_cutoff : float
-        Energy difference cutoff for the non-adiabatic coupling calculation.
+        Per-pair energy-gap cutoff. A coupling is computed for states i and j
+        only when |E_j - E_i| < de_cutoff; every other pair is left at zero.
+        The gradients and Hessians are skipped entirely when no pair qualifies.
 
     Returns
     -------
@@ -162,7 +168,9 @@ def _get_couplings(
     # Calculate the energy difference between all states
     diff_epot = _calculate_diff_energy(epot)
 
-    # Check if any energy difference between all states is lower than the cutoff
+    # Cost gate only: if no pair at all is within the cutoff there is nothing to
+    # couple, so the gradients and Hessians need not be computed. Which pairs
+    # actually receive a coupling is decided per pair in the loop below.
     if np.any(diff_epot < de_cutoff):
         grad = -PES_Force(
             q, states
@@ -181,7 +189,16 @@ def _get_couplings(
     for i in states:  # Rows are the states hopping from
         for j in states:  # Columns are the states hopping to
             if i < j:
-                if grad is not None:
+                # The check above only decides whether the gradients and Hessians
+                # are worth computing at all. Each pair must still be filtered on
+                # its own gap: with three or more states a single close pair
+                # would otherwise hand a coupling to every well-separated pair as
+                # well. That is exactly where the curvature approximation is
+                # least trustworthy -- with no genuine avoided crossing it does
+                # not decay, so a spurious coupling there drives spurious
+                # hopping. With two states the two checks coincide, which is why
+                # this went unnoticed.
+                if grad is not None and abs(epot[j] - epot[i]) < de_cutoff:
                     # Compute the upper triangle matrix elements
                     d[i, j] = calculate_nac(
                         [epot[i], epot[j]],

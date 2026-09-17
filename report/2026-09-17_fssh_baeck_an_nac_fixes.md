@@ -382,6 +382,74 @@ density-matrix equivalence above.
 
 ---
 
+## 10b. Bug 9 -- `de_cutoff` was a global switch, not a per-pair filter
+
+*Found and fixed 2026-09-18, after the rest of this report.*
+
+### What was wrong
+
+`_get_couplings` gated on whether **any** state pair was inside the cutoff:
+
+```python
+if np.any(diff_epot < de_cutoff):     # fssh.py:174
+    grad = -PES_Force(q, states)
+    hess =  PES_Hessian(q, states)
+```
+
+and the pair loop below then handed **every** pair to `calculate_nac` without
+re-checking that pair's own gap. One close pair anywhere in the manifold
+therefore produced couplings between all states, however far apart.
+
+### Why it mattered
+
+Three states, gaps 0.01 / 2.01 / 2.00 hartree, `de_cutoff = 0.1`:
+
+| pair | gap (Ha) | before | after |
+|---|---|---|---|
+| 0-1 | 0.010 | 1.223 | 1.223 |
+| 0-2 | 2.010 | **0.079** | 0.000 |
+| 1-2 | 2.000 | **0.112** | 0.000 |
+
+The spurious couplings are not harmlessly small, and they appear exactly where
+the approximation is least defensible. Section 2 of the Tully validation
+(`validation/tully`) established that Baeck-An does not decay where there is no
+genuine avoided crossing -- on the extended-coupling model it sat two orders of
+magnitude above the exact coupling across the whole approach region. Feeding
+that into `_eval_hop_prob` drives real spurious hopping between states that are
+not interacting.
+
+Compounding it, the default `de_cutoff = 0.5` hartree (13.6 eV) is permissive
+enough that the gate almost never excludes anything, so the cutoff was both
+inert by default and misapplied when narrowed.
+
+### Why it was not caught
+
+**Every existing test, and the whole Tully validation, is two-state.** With two
+states there is exactly one pair, so the global check and the per-pair check are
+the same check. The defect only exists from three states upward.
+
+### The fix
+
+The `np.any` test is kept, but demoted to what it actually is -- a cost gate
+that decides whether the gradients and Hessians are worth computing at all --
+and the filter proper moved into the pair loop:
+
+```python
+if grad is not None and abs(epot[j] - epot[i]) < de_cutoff:
+```
+
+Both docstrings now say "per-pair energy-gap cutoff" rather than the ambiguous
+"energy difference cutoff for the non-adiabatic coupling calculation".
+
+### Verified
+
+`src/tests/test_fssh_couplings.py`, 15 tests: the three-state regression, the
+per-pair property parametrised over 2 to 6 states, antisymmetry at every state
+count, monotonicity of the cutoff, and that the Hessian is genuinely skipped
+when no pair qualifies. Reverting the one-line fix fails 5 of them -- and the
+two-state parametrisation passes either way, which is the defect's own
+signature.
+
 ## 11. What was audited and found correct
 
 Not everything suspicious turned out to be a bug. The following were checked in
@@ -415,7 +483,7 @@ detail and are right as written:
 | `src/fssh/fssh.py` | unitary `exp(-iH dtq)` propagator replacing RK4; new `_effective_hamiltonian`; hop probabilities rescaled to at most one with a warning; energy-based decoherence correction replacing the empty `_decoherence` stub; `_get_couplings` gained `previous` and forwards it; `__call__` passes `self.d` |
 | `src/dynamics/quantum_driver.py` | converts `dtq` from femtoseconds to atomic units; exposes `de_corr` |
 | `src/tests/test_baeck_an_nac.py` | new, 7 tests |
-| `src/tests/test_fssh_propagation.py` | new, 26 tests |
+| `src/tests/test_fssh_propagation.py`, `src/tests/test_fssh_couplings.py` | new, 26 tests |
 | `src/tests/test_fssh_wiring.py` | 2 tests added for the `dtq` unit convention; the trajectory test seeded and retuned |
 
 The hop selection, frustrated-hop test and velocity rescaling are untouched.
