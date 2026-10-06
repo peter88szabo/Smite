@@ -252,10 +252,9 @@ def _all_vibrations(thermo, freqs_cm1, temp, freq_cutoff):
         ex = math.exp(x)
         u_mode = omega_cm1 * CM1_TO_HARTREE / (ex - 1.0)
         cv_mode = RGAS_AU * x * x * ex / ((ex - 1.0) * (ex - 1.0))
-        if omega_cm1 > freq_cutoff:
-            s_mode = _entropy_vib_rrho(omega_cm1, temp)
-        else:
-            s_mode = _grimme_entropy_qrrho(omega_cm1, freq_cutoff, temp)
+        # Grimme qRRHO mixing (Chem. Eur. J. 18, 9955 (2012)) for EVERY mode; the damping
+        # w -> 1 makes high modes pure RRHO smoothly, and freq_cutoff = 0 gives RRHO.
+        s_mode = _grimme_entropy_qrrho(omega_cm1, freq_cutoff, temp)
         f_mode = u_mode - temp * s_mode
         pf_mode = math.exp(-f_mode / rt)
 

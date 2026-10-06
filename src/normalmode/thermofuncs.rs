@@ -454,11 +454,9 @@ fn all_vibrations(thermo: &mut ThermoResults, freqs_cm1: &[f64], temp: f64, freq
 
         let Cv_mode = RGAS_AU * x * x * ex / ((ex - 1.0) * (ex - 1.0));
 
-        let S_mode = if omega_cm1 > freq_cutoff {
-            entropy_vib_rrho(omega_cm1, temp)
-        } else {
-            grimme_entropy_qrrho(omega_cm1, freq_cutoff, temp)
-        };
+        // Grimme qRRHO mixing (Chem. Eur. J. 18, 9955 (2012)) for EVERY mode; the damping
+        // w -> 1 makes high modes pure RRHO smoothly, and freq_cutoff = 0 gives RRHO.
+        let S_mode = grimme_entropy_qrrho(omega_cm1, freq_cutoff, temp);
 
         let F_mode = U_mode - temp * S_mode;
         let PF_mode = f64::exp(-F_mode / RT);

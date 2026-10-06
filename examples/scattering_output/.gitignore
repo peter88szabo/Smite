@@ -1,3 +1,0 @@
-# Dense output grids: regenerate with the example rather than storing them.
-*.dat
-*.xyz

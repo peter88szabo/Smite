@@ -2,6 +2,9 @@
 __pycache__/
 *.py[cod]
 *$py.class
+continue.txt
+report/
+validation/
 
 papers/
 
