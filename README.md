@@ -1,6 +1,6 @@
 # Smite
 
-Smite is a Python toolkit for quasiclassical trajectory calculations for molecular collisions and unimolecular dynamics. It supports constant-energy NVE trajectories, thermalized NVT trajectories, analytical and machine-learned potential energy surfaces, ab initio molecular dynamics where the forces are evaluated by external quantum chemistry backends, and nonadiabatic dynamics on coupled electronic states. Alongside trajectories it provides geometry optimization, transition-state and IRC following, coordinate scans, and vibrational and thermochemical analysis.
+Smite is a Python toolkit for quasiclassical trajectory calculations for quantum-state resovled molecular collisions and unimolecular dynamics. It supports constant-energy NVE trajectories, thermalized NVT trajectories, analytical and machine-learned potential energy surfaces, ab initio molecular dynamics where the forces are evaluated by external quantum chemistry backends, and nonadiabatic dynamics on coupled electronic states. Alongside trajectories it provides geometry optimization, transition-state and IRC following, coordinate scans, and vibrational and thermochemical analysis.
 
 The public import surface is kept intentionally simple:
 
@@ -10,42 +10,19 @@ from smite import Molecule, Fragment, Collision, Photoionization
 
 ## Main Capabilities
 
-- Molecular collision and unimolecular trajectory simulations.
+- Quantum-state resolved molecular collision and unimolecular trajectory simulations.
 - NVE dynamics and NVT dynamics through thermostats such as Nose-Hoover and GLE colored-noise thermostat support.
 - Analytical and machine-learned PES calculations through `peslib/` and the PES interface.
 - Ab initio MD force and energy calls through interfaces such as XTB, ORCA, Psi4, PySCF, SCINE Sparrow, Molpro, and PES-backed calculations.
 - Nonadiabatic dynamics by fewest-switches surface hopping on coupled electronic states.
-- Photoionization initial conditions for TPEPICO-style experiments.
+- Time-depedent X-ray and electron scattering form factors (and their spectrum) from trajectories
+- Photoionization initial conditions for PEPICO-style experiments.
 - Initial condition sampling for translational, rotational, vibrational, thermal, and normal-mode based setups.
 - Rigid-fragment propagation with SHAKE/RATTLE constraints and reversible rigid-body drift.
 - Geometry optimization, transition-state searches, IRC following, minimum-energy crossing points, and relaxed one- and two-dimensional coordinate scans.
 - Vibrational frequency analysis and thermochemistry, including Grimme quasi-RRHO entropies.
-- Analysis helpers for vibrational spectra, time-resolved spectra, energy partitioning, and scattering form factors.
-- Independent parallel trajectory scheduling, restartable runs, and a `smite-gui` graphical input builder.
-
-## Photoionization initial conditions
-
-Create `photoion = Photoionization(molecule, qchem=qcinput_ion, ...)` with the
-neutral source and experimental energies. For Hessian-based QCT, define the
-neutral ensemble with `photoion.Specify_Mode_Sampling(...)`. Then call
-`photoion.sample_and_run_dynamics(...)` with the usual integration and stopping
-options. Use `pairs_to_stop` for named distance-based channels or `Rstop` for the
-global atom-pair distance threshold; both are checked every step.
-
-The constructor always requires `neutra_frankcondon_geom`. A supplied
-`neutral_traj` selects saved neutral coordinates and momenta; otherwise
-`neutral_hessian` is required for QCT. It does not run neutral MD or calculate a
-Hessian. The one-call `molecule.tpepico(...)` interface also remains available.
-
-Level 0 retains the sampled momenta. Level 1 scales all atomic Cartesian
-momenta to experimental energy constraints. `electron_energy` and `ionic_energy`
-each accept a single value or an `(energy_grid, density_grid)` distribution,
-in every combination. Energies are eV; `ionic_energy` means binding energy
-(photon energy minus electron kinetic energy).
-
-See the [complete photoionization input](examples/example_photoionization.py)
-and [usage guide](src/photoionization/README.md) for both input paths, energy
-conventions, neutral mode sampling, and ionic dynamics.
+- Analysis helpers with short-time FFT for vibrational spectra, time-resolved spectra, energy partitioning, and scattering form factors.
+- Independent parallel trajectory scheduling, restartable runs, and a `smite-gui` graphical input builder (under development).
 
 ## Nonadiabatic dynamics (surface hopping)
 
@@ -53,37 +30,6 @@ Trajectories can propagate on more than one electronic state using Tully's
 fewest-switches surface hopping, with Baeck-An nonadiabatic couplings obtained
 from the adiabatic energy gap. Pass `q_integrator="fssh"` to `run_trajectory`
 together with one `qcinput` per electronic state, lowest state first:
-
-```python
-states = [
-    {"qchem": "PES", "pes_name": "H2O+Kr+", "state": 0},
-    {"qchem": "PES", "pes_name": "H2O+Kr+", "state": 1},
-]
-
-molecule.run_trajectory(
-    integrator="verlet",
-    timestep=0.25,
-    q_integrator="fssh",
-    num_states=2,
-    active_state=1,
-    state_qcinput=states,
-    dtq=0.025,
-    de_cutoff=0.5,
-    Rstop=50.0,
-)
-```
-
-- `state_qcinput` must list exactly `num_states` entries. Its order defines the
-  state indices and is never re-sorted by energy, because the hop probabilities
-  are indexed by it.
-- `dtq` is the quantum timestep, in the same unit as `timestep`, defaulting to
-  `timestep / 10`. The electronic amplitudes advance `timestep / dtq` times per
-  classical step.
-- `de_cutoff` is the adiabatic energy gap in Hartree below which couplings are
-  evaluated. Above it the per-state gradients and Hessians are skipped.
-- After a hop the surface-selecting keys are merged into `molecule.qchem`, so
-  the classical force follows the new state. `molecule.active_state` holds the
-  current state throughout the run.
 
 The quantum step runs after the classical step and the thermostat and acts on
 the momenta only. With the default `q_integrator=None` the propagation is
@@ -116,40 +62,6 @@ TorchScript file per electronic state, and are what the surface-hopping example
 above runs on. Their interface also exposes `variance(q, atoms)`, the GP
 variance, which grows sharply once a trajectory leaves the training region and
 is worth monitoring on long runs.
-
-## Scientific parameter conventions
-
-- For the Andersen thermostat, `thermo_param` is the mean per-atom collision
-  time in femtoseconds. The collision probability per MD step is
-  `1 - exp(-timestep / thermo_param)`. With COM removal or rigid constraints,
-  a single collision clock redraws all Cartesian momenta, then projects the
-  constraints. This collective update preserves the constrained Maxwell
-  distribution; the mean redraw time of each atom remains `thermo_param`.
-- `nfix` is a count of removed degrees of freedom; it is never interpreted as
-  a suffix of Cartesian coordinates. Center-of-mass momentum and rigid
-  constraints are projected as physical modes.
-- Product equilibrium geometries must use the same atom order as the product
-  fragment. Their mass-weighted best-fit orientation is used when contracting
-  the equilibrium inertia tensor with the instantaneous angular momentum.
-- A collision's `sampling_seed` seeds the complete initial-condition draw once;
-  its two fragments consume successive draws. Default GLE generators also draw
-  their seeds from this stream. An explicit GLE `thermo_param["seed"]` overrides
-  that choice for a single trajectory.
-- Reaction conditions are checked at every state, including `maxstep`, and the
-  terminal frame is written regardless of `iprint`. The molecule records
-  `termination_reason` (`"stop_condition"` or `"maxstep"`),
-  `termination_channel`, `termination_step`, and `termination_time_fs`.
-- Thermochemistry accepts explicit `symmetry_number` and
-  `chirality_number` arguments. For example, use `symmetry_number=2` for
-  water and `symmetry_number=12` for methane. As in MarXus, the default is
-  one because a reliable general symmetry number cannot be inferred from an
-  arbitrary noisy geometry.
-- Thermal harmonic populations always use each mode's physical frequency.
-  The legacy `thermal_frequency_cutoff_cm1` keyword is accepted but ignored
-  with a warning because applying it only to populations is noncanonical.
-- Morse `energy` sampling specifies total bound rovibrational energy in
-  Hartree and therefore requires fixed `J`. Thermal Morse vibration and
-  rotation use the coupled bound-state canonical distribution.
 
 ## Installation
 
@@ -527,24 +439,6 @@ neutral parent: the elastic term is exact for the ion, the inelastic term is
 not. The library warns once per ionic species, and
 `isf_is_approximated(species)` reports it programmatically.
 
-### Data caveats
-
-`f0(q=0)` equals the electron count, which makes the tables self-checking.
-`electron_count_error(species)` returns the residual; it is below 0.06 electrons
-for every species except four, where the published actinide block has two
-swapped pairs:
-
-| Entry | Coefficients sum to | Should be |
-| --- | --- | --- |
-| `Np3+` | 87.0 | 90 |
-| `Np6+` | 90.0 | 87 |
-| `Np4+` | 94.0 | 89 |
-| `Pu` | 89.0 | 94 |
-
-`Np3+`/`Np6+` and `Np4+`/neutral `Pu` carry each other's coefficients. Using any
-of the four raises a `RuntimeWarning`; their results should not be trusted. The
-check is derived from the data rather than a fixed list, so any similar defect
-would be caught too.
 
 ## Parallel Trajectory Runs
 
@@ -580,32 +474,9 @@ During parallel runs, per-trajectory sampling/initial-condition text is written 
 
 Progress display is controlled with `progress_mode`. Use `progress_mode="table"` for a live table that overwrites the same terminal lines, `progress_mode="log"` for compact line updates in redirected output, `progress_mode="none"` to silence it, or keep the default `progress_mode="auto"` to choose table mode only when stdout is an interactive terminal.
 
-## Repository Layout
-
-- `src/smite.py`: public compatibility module exposing `Molecule`, `Fragment`, `Collision`, and `Photoionization`.
-- `src/core/`: main molecular, fragment, and collision classes.
-- `src/dynamics/`: trajectory scratch, wavefunction, constraint, rigid-body, integrator, thermostat, and quantum driver helpers.
-- `src/integrators/`: MD, predictor-corrector, and constrained RATTLE integrators.
-- `src/fssh/`: fewest-switches surface hopping, Baeck-An couplings, and the adapter serving them from `pesrun`.
-- `src/photoionization/`: photoionization initial conditions and ionic dynamics.
-- `src/optimizer/`: minima, transition states, IRC, spin crossings, and coordinate scans.
-- `src/normalmode/`: Hessians, Eckart projection, frequencies, and thermochemistry.
-- `src/analysis/`: spectra, energy partitioning, conservation checks, and scattering form factors.
-- `src/analysis/data/`: offline ESRF DABAX atomic scattering tables.
-- `src/parallel/`: independent parallel trajectory scheduling helpers.
-- `src/thermostats/`: NVT thermostat implementations.
-- `src/qchem_interfaces/`: external quantum chemistry and PES force interfaces.
-- `src/smite_gui/`: the `smite-gui` graphical input builder.
-- `peslib/`: predefined potential energy surfaces and PES interface examples.
-- `src/sampling/`, `src/utils/`: supporting simulation tools.
-- `src/tests/`: the pytest suite.
-- `src/test*.py`: example input scripts.
-- `papers/`: local reference material, not packaged.
-
 Generated scratch directories, output files, compiled PES binaries, build products, and the `papers/` reference directory are intentionally excluded from package distributions. PES source/interface files are kept in source distributions so they can be rebuilt locally when needed.
 
 ## Development Checks
-
 Run the test suite from the repository root:
 
 ```bash
